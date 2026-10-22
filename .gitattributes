@@ -1,3 +1,5 @@
 * text=auto eol=lf
 *.duckdb binary
 *.parquet binary
+# Real API responses: keep byte-for-byte, no line-ending conversion
+tests/fixtures/** -text

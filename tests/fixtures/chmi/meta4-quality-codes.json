@@ -1,0 +1,17 @@
+{
+  "zaznamID": "36588ad9-edad-affc-4ec8-8baee648e75e",
+  "datovyZdrojID": "meteorologie",
+  "datovyTokID": "Open.Data.Metadata",
+  "datumVytvoreni": "2026-10-22T00:01:02.401Z",
+  "verzeDat": "1.0",
+  "data":
+{
+ "type": "DataCollection",
+ "data":{"header":"FLAG2,DESCRIPTION","values":[
+[0.0,"Good/Kvalitní hodnota"]
+,[1.0,"Suspect/Podezřelá hodnota"]
+,[2.0,"Poor/Hodnota s nízkou kvalitou, podezřelá, zatím nepoužívat"]
+,[3.0,"Estimated/Odhadnutá hodnota"]
+,[4.0,"Missing/Chybějící hodnota"]
+,[5.0,"Unknown/Kvalita neznámá"]
+]}}}
