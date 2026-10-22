@@ -75,15 +75,17 @@ flowchart LR
 
 ### 3.2 Слои данных
 
-**`raw`**: данные как пришли, плюс технические колонки. Пишет только Python.
+**`raw`**: данные как пришли (провалидированы pydantic, приведены к колонкам), плюс `_run_id` и `_ingested_at`. Пишет только Python ([warehouse.py](../src/energy_pipeline/load/warehouse.py)).
 
-- `raw.ote_dam_results`: report_date, period (1..100), price_eur_mwh, volume_mwh, `_ingested_at`, `_source_url`, `_payload_hash`
-- `raw.cnb_fx_rates`: valid_for, currency_code, amount, rate, `_ingested_at`
-- `raw.chmi_observations`: station_id, element, observed_at_utc, value, flag, `_ingested_at`
-- `raw.chmi_stations`: метаданные станций (координаты, высота, название)
-- `ops.pipeline_runs`: run_id, source, business_date, status, rows, duration, error
+- `raw.ote_dam_results`: delivery_date, period (1..100), mtu_minutes (15/60), price_eur_mwh, price_60min_ref_eur_mwh, volume_mwh
+- `raw.cnb_fx_rates`: valid_for, currency_code, amount, rate, country, currency
+- `raw.chmi_observations`: station_id, element, observed_at (TIMESTAMPTZ, UTC), value (NULL = пропуск), flag, quality, source_folder (recent/now)
+- `raw.chmi_stations`: метаданные всех станций ČHMÚ (координаты, высота, название)
+- `ops.pipeline_runs`: run_id, source, business_date, status (success/no_data/failed), rows_loaded, started_at, finished_at, error
 
-Загрузка **идемпотентна**: перезапуск за ту же дату делает `DELETE + INSERT` по ключу (source, business_date). Так безопасны ретраи и бэкфилл.
+Загрузка **идемпотентна**: в одной транзакции удаляются строки с тем же естественным ключом (например `delivery_date + period`), затем вставляются новые. Так безопасны ретраи, перезагрузка недели ČHMÚ и бэкфилл. PRIMARY KEY на raw-таблицах намеренно нет: DuckDB проверяет ограничения сразу, и DELETE + INSERT одного ключа в одной транзакции падает. Уникальность проверяют тесты dbt.
+
+> **Часовой пояс:** DuckDB по умолчанию берёт TimeZone компьютера (у нас Europe/Prague), поэтому `observed_at::date` даёт местную дату, а не UTC. Загрузчик и dbt явно ставят `SET TimeZone = 'UTC'`, а локальное время считается только явным `AT TIME ZONE 'Europe/Prague'`.
 
 **`staging`** (dbt, view): одна модель на одну сырую таблицу. Переименование, типы, единицы измерения, таймзоны (локальное время Europe/Prague → UTC + local), дедупликация.
 
@@ -168,7 +170,7 @@ czech-energy-pipeline/
 - Описать в `docs/sources.md` форматы, коды элементов ČHMÚ, ID станций, время публикации.
 - **Готово, когда:** все форматы задокументированы, выбран список станций.
 
-### Этап 2. Extractors + raw-загрузка (~2 дня)
+### Этап 2. Extractors + raw-загрузка (~2 дня): ✅ готово
 - По порядку от простого к сложному: ČNB → OTE → ČHMÚ.
 - `httpx` + ретраи, pydantic-валидация, идемпотентный loader в DuckDB, запись в `ops.pipeline_runs`.
 - Тесты на фикстурах (`respx` для мока HTTP), включая DST и пустые ответы.
