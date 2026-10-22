@@ -1,0 +1,51 @@
+[project]
+name = "energy-pipeline"
+version = "0.1.0"
+description = "Daily ETL for the Czech electricity market: OTE day-ahead prices, ČNB FX rates and ČHMÚ weather into DuckDB, modelled with dbt."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pydantic-settings>=2.6",
+]
+
+[project.scripts]
+pipeline = "energy_pipeline.cli:main"
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.0",
+    "pytest>=8.3",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/energy_pipeline"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",  # pycodestyle
+    "F",       # pyflakes
+    "I",       # isort
+    "B",       # bugbear
+    "UP",      # pyupgrade
+    "SIM",     # simplify
+    "DTZ",     # naive datetimes: important with CET/CEST data
+    "PTH",     # pathlib
+    "RUF",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "integration: tests that call real external APIs (deselect with -m 'not integration')",
+]
