@@ -51,6 +51,7 @@ def ote_series(name: str) -> dict[str, int]:
             },
         ),
         ("dam_2026-10-30_not_published.json", {}),
+        ("dam_2025-07-04_partial_12h.json", {"Volume (MWh)": 12, "Price (EUR/MWh)": 12}),
     ],
 )
 def test_ote_series_and_period_counts(name: str, expected: dict[str, int]) -> None:

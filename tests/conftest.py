@@ -21,6 +21,16 @@ def load_fixture() -> Callable[[str], Any]:
     return load
 
 
+@pytest.fixture
+def fixture_text() -> Callable[[str], str]:
+    """Raw text of a stored response, for non-JSON sources such as the ČHMÚ CSV archive."""
+
+    def read(name: str) -> str:
+        return (FIXTURES / name).read_text("utf-8")
+
+    return read
+
+
 @pytest.fixture(autouse=True)
 def no_retry_wait() -> Iterator[None]:
     """Retries stay on, but without the exponential back-off sleeps."""

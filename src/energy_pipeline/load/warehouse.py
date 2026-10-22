@@ -84,7 +84,8 @@ PIPELINE_RUNS_DDL = """
 CREATE TABLE IF NOT EXISTS ops.pipeline_runs (
     run_id VARCHAR NOT NULL,
     source VARCHAR NOT NULL,
-    business_date DATE NOT NULL,
+    business_date DATE NOT NULL,  -- first day of the loaded period
+    period_end DATE NOT NULL,  -- last day; equals business_date for daily tasks
     status VARCHAR NOT NULL,  -- success | no_data | failed
     rows_loaded INTEGER NOT NULL,
     started_at TIMESTAMPTZ NOT NULL,
@@ -149,17 +150,24 @@ class Warehouse:
         run_id: str,
         source: str,
         business_date: date,
+        period_end: date,
         status: str,
         rows_loaded: int,
         started_at: datetime,
         error: str | None = None,
     ) -> None:
         self.con.execute(
-            "INSERT INTO ops.pipeline_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            """
+            INSERT INTO ops.pipeline_runs (
+                run_id, source, business_date, period_end, status,
+                rows_loaded, started_at, finished_at, error
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
             [
                 run_id,
                 source,
                 business_date,
+                period_end,
                 status,
                 rows_loaded,
                 started_at,
@@ -167,3 +175,14 @@ class Warehouse:
                 error,
             ],
         )
+
+    def succeeded_periods(self) -> set[tuple[str, date, date]]:
+        """(source, business_date, period_end) of every task that ever loaded data."""
+        rows = self.con.execute(
+            """
+            SELECT DISTINCT source, business_date, period_end
+            FROM ops.pipeline_runs
+            WHERE status = 'success'
+            """
+        ).fetchall()
+        return set(rows)

@@ -8,7 +8,14 @@ import respx
 from energy_pipeline.extract import chmi, cnb, ote
 from energy_pipeline.http import make_client
 from energy_pipeline.load.warehouse import Warehouse
-from energy_pipeline.pipeline import SOURCES, Task, daily_tasks, run_tasks
+from energy_pipeline.pipeline import (
+    SOURCES,
+    Task,
+    backfill_tasks,
+    daily_tasks,
+    pending,
+    run_tasks,
+)
 
 DAY = date(2026, 10, 21)
 TODAY = date(2026, 10, 22)
@@ -110,3 +117,44 @@ def test_daily_tasks() -> None:
     chmi_days = sorted(t.business_date for t in tasks if t.source == "chmi")
     assert chmi_days[0] == date(2026, 10, 15)
     assert chmi_days[-1] == date(2026, 10, 21)
+
+
+def test_backfill_tasks_chunk_per_source() -> None:
+    tasks = backfill_tasks(date(2024, 12, 30), date(2025, 2, 2))
+    by_source = {s: [t for t in tasks if t.source == s] for s in SOURCES}
+
+    assert len(by_source["ote"]) == 35
+    assert all(t.until is None for t in by_source["ote"])
+    assert by_source["cnb"] == [
+        Task("cnb", date(2024, 12, 30), date(2024, 12, 31)),
+        Task("cnb", date(2025, 1, 1), date(2025, 2, 2)),
+    ]
+    assert by_source["chmi"] == [
+        Task("chmi", date(2024, 12, 30), date(2024, 12, 31)),
+        Task("chmi", date(2025, 1, 1), date(2025, 1, 31)),
+        Task("chmi", date(2025, 2, 1), date(2025, 2, 2)),
+    ]
+
+
+@respx.mock
+def test_cnb_backfill_keeps_only_the_period(warehouse: Warehouse, load_fixture) -> None:
+    respx.get(cnb.YEAR_URL).mock(
+        return_value=httpx.Response(200, json=load_fixture("cnb/year_2024.head.json"))
+    )
+
+    [result] = run(warehouse, [Task("cnb", date(2024, 1, 3), date(2024, 1, 4))])
+
+    days = warehouse.con.execute("SELECT DISTINCT valid_for FROM raw.cnb_fx_rates").fetchall()
+    assert result.status == "success"
+    assert sorted(day for (day,) in days) == [date(2024, 1, 3), date(2024, 1, 4)]
+    assert warehouse.con.execute("SELECT period_end FROM ops.pipeline_runs").fetchone() == (
+        date(2024, 1, 4),
+    )
+
+
+@pytest.mark.usefixtures("api")
+def test_pending_skips_succeeded_periods(warehouse: Warehouse) -> None:
+    done, todo = Task("cnb", DAY), Task("cnb", date(2026, 10, 20))
+    run(warehouse, [done])
+
+    assert pending([done, todo], warehouse) == [todo]

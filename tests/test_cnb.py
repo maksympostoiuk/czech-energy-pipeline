@@ -45,3 +45,21 @@ def test_fetch_daily_sends_date_and_retries_server_errors(load_fixture) -> None:
 
     assert route.call_count == 2
     assert len(rates) == 30
+
+
+def test_parse_year_has_no_names(load_fixture) -> None:
+    rates = cnb.parse_daily(load_fixture("cnb/year_2024.head.json"))
+
+    assert sorted({rate.valid_for for rate in rates})[0] == date(2024, 1, 2)
+    assert {rate.country for rate in rates} == {None}
+    assert "EUR" in {rate.currency_code for rate in rates}
+
+
+@respx.mock
+def test_fetch_year(load_fixture) -> None:
+    respx.get(cnb.YEAR_URL, params={"year": "2024"}).mock(
+        return_value=httpx.Response(200, json=load_fixture("cnb/year_2024.head.json"))
+    )
+
+    with make_client() as client:
+        assert cnb.fetch_year(client, 2024)

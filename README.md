@@ -22,6 +22,8 @@ uv run pipeline config        # show which database the pipeline will use
 uv run pipeline run --date 2026-10-21              # all sources for one business date
 uv run pipeline run --date 2026-10-21 --source ote # one source
 uv run pipeline daily                              # the scheduled run
+uv run pipeline backfill --from 2024-01-01         # history up to today (~15 min)
+uv run pipeline backfill --from 2024-01-01 --resume  # continue an interrupted backfill
 ```
 
 `daily` loads tomorrow's and today's day-ahead prices, today's ČNB fixing and re-loads the last

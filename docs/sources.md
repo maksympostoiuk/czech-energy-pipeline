@@ -65,6 +65,13 @@ days. Instead, convert local midnight of the delivery day to UTC and add `(x-1) 
 | last Sunday of March | 92 / 23 | 02:00–03:00 does not exist |
 | last Sunday of October | 100 / 25 | 02:00–03:00 happens twice |
 
+**Known incomplete day: 2025-07-04.** The JSON has only periods 1–12. The official XLSX report
+(`/pubweb/attachments/01/2025/month07/day04/DM_04_07_2025_EN.xlsx`) shows the same thing: hours
+13–24 contain `ES` (`SN` in the Czech version) instead of prices, so those hours have no market
+results. Such days are listed in `ote.KNOWN_INCOMPLETE_DAYS`, where a contiguous run of periods from
+the start of the day is accepted. Any other short day still fails the load. dbt must exclude the
+same list from its period-count test.
+
 **Not yet published.** A future date returns HTTP `200` with `"dataLine": []`. That is "not published
 yet", not an error and not zero prices.
 
@@ -79,7 +86,8 @@ raised automatically, so keep the limits in config rather than hard-coding them 
 
 ```
 GET https://api.cnb.cz/cnbapi/exrates/daily?date=YYYY-MM-DD&lang=EN
-GET https://api.cnb.cz/cnbapi/exrates/daily-currency-month?currency=EUR&yearMonth=YYYY-MM   # backfill
+GET https://api.cnb.cz/cnbapi/exrates/daily-year?year=YYYY                                    # backfill
+GET https://api.cnb.cz/cnbapi/exrates/daily-currency-month?currency=EUR&yearMonth=YYYY-MM   # one currency
 ```
 
 **Response shape**
@@ -94,8 +102,10 @@ GET https://api.cnb.cz/cnbapi/exrates/daily-currency-month?currency=EUR&yearMont
   `2026-09-25`. The business key is therefore `(validFor, currencyCode)`, never the requested date.
 - 30 currencies. `rate` is CZK per `amount` units: `amount` is 100 for HUF, JPY, INR and others, and
   1000 for IDR. Always divide `rate` by `amount`.
-- `daily-currency-month` returns business days only (21 rows for 2026-09). A whole month costs one
-  request, which is ideal for backfill.
+- `daily-year` returns every business day of a year for all currencies (31 in 2024) in one
+  request, which is what the backfill uses. Its rows have no `country` / `currency` names, so
+  those raw columns are nullable and staging takes names from the latest daily load.
+- `daily-currency-month` returns business days only (21 rows for 2026-09).
 - Calendar days without a fixing are filled in dbt by carrying the last fixing forward
   (`int_fx_rates_daily_filled`).
 
@@ -184,13 +194,24 @@ including global radiation. Praha-Ruzyně was skipped because it has no `RGLB10`
 |---|---|---|
 | OTE | D+1, plus re-fetch D | an empty `dataLine` for D+1 means "retry later", not a failure |
 | ČNB | today | upsert on `(validFor, currencyCode)` |
-| ČHMÚ | D-1 from `now/`, plus re-load D-2…D-7 from `recent/` | picks up quality-control corrections |
+| ČHMÚ | D-1…D-7, each from `recent/` (quality-checked, has D-1 by ~12:15 UTC) or else `now/` | picks up quality-control corrections; `source_folder` records which one |
 
-**Backfill from 2024-01-01:**
+**Backfill from 2024-01-01** (`pipeline backfill --from 2024-01-01 [--to …] [--source …] [--resume]`).
+Requests are throttled to one every 0.25 s per host. Every chunk is logged in `ops.pipeline_runs`
+with `business_date..period_end`, and `--resume` skips chunks that already succeeded.
 
 | Source | Requests | Volume |
 |---|---|---|
-| OTE | ~1,000 (one per day, throttled to ~1 req/s) | < 10 MB |
-| ČNB | ~34 (one per month) | < 1 MB |
+| OTE | ~1,000 (one task per day) | < 10 MB |
+| ČNB | 3 (one task per calendar year, `daily-year`) | ~1.5 MB |
 | ČHMÚ 2024–2025 (`historical_csv`) | 8 stations × 6 elements × 24 months = 1,152 files | ~230 MB |
-| ČHMÚ 2026 (`recent/{MM}/` monthly JSON, all elements) | 8 × 9 files | ~420 MB; filter while streaming |
+| ČHMÚ 2026 (`recent/{MM}/` monthly JSON, all elements) | 8 × 9 files | ~420 MB, filtered to our elements |
+| ČHMÚ current month (daily files) | 8 per day | ~1.5 MB per day |
+
+ČHMÚ is backfilled one task per calendar month. For each station the archives are tried from the
+most to the least compact: historical CSV (a 404 on the first element means the year is not
+archived yet), then the monthly JSON in `recent/{MM}/`, then the daily files.
+
+The archives are not always complete. For example, the CSV for 2025-12-31 has 6,864 of 6,912
+rows, because a few 10-minute values are absent rather than marked missing. dbt tests should
+therefore check completeness against a threshold, not demand exactly 144 values per day.

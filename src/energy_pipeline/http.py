@@ -1,5 +1,6 @@
-"""Shared HTTP client: one place for timeouts, the User-Agent and retries."""
+"""Shared HTTP client: one place for timeouts, the User-Agent, throttling and retries."""
 
+import time
 from typing import Any
 
 import httpx
@@ -12,15 +13,29 @@ from tenacity import (
 
 from energy_pipeline import __version__
 
-USER_AGENT = f"czech-energy-pipeline/{__version__} (+https://github.com/maksympostoiuk/czech-energy-pipeline)"
+USER_AGENT = (
+    f"czech-energy-pipeline/{__version__} "
+    "(+https://github.com/maksympostoiuk/czech-energy-pipeline)"
+)
 RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 
 
-def make_client(timeout: float = 30.0) -> httpx.Client:
+def make_client(timeout: float = 30.0, min_interval: float = 0.0) -> httpx.Client:
+    """min_interval: minimum seconds between two requests to the same host (for backfills)."""
+    last_request: dict[str, float] = {}
+
+    def throttle(request: httpx.Request) -> None:
+        host = request.url.host
+        wait = last_request.get(host, 0.0) + min_interval - time.perf_counter()
+        if wait > 0:
+            time.sleep(wait)
+        last_request[host] = time.perf_counter()
+
     return httpx.Client(
         timeout=timeout,
         follow_redirects=True,
         headers={"User-Agent": USER_AGENT},
+        event_hooks={"request": [throttle]} if min_interval > 0 else {},
     )
 
 
@@ -43,6 +58,17 @@ def _get(client: httpx.Client, url: str, params: dict[str, str] | None) -> httpx
     return response
 
 
+def _get_found(
+    client: httpx.Client, url: str, params: dict[str, str] | None, allow_not_found: bool
+) -> httpx.Response | None:
+    response = _get(client, url, params)
+    if response.status_code == 404:
+        if allow_not_found:
+            return None
+        response.raise_for_status()
+    return response
+
+
 def get_json(
     client: httpx.Client,
     url: str,
@@ -55,9 +81,10 @@ def get_json(
     With allow_not_found, a 404 returns None instead of raising: for file-based sources
     such as ČHMÚ a missing file is an expected answer, not an error.
     """
-    response = _get(client, url, params)
-    if response.status_code == 404:
-        if allow_not_found:
-            return None
-        response.raise_for_status()
-    return response.json()
+    response = _get_found(client, url, params, allow_not_found)
+    return None if response is None else response.json()
+
+
+def get_text(client: httpx.Client, url: str, *, allow_not_found: bool = False) -> str | None:
+    response = _get_found(client, url, None, allow_not_found)
+    return None if response is None else response.text

@@ -87,17 +87,21 @@ def test_observations_keep_utc_and_missing_values(warehouse: Warehouse, load_fix
     assert missing == sum(row["value"] is None for row in rows) > 0
 
 
-def test_log_run(warehouse: Warehouse) -> None:
-    warehouse.log_run(
-        run_id="r",
-        source="ote",
-        business_date=date(2026, 10, 21),
-        status="failed",
-        rows_loaded=0,
-        started_at=datetime.now(UTC),
-        error="boom",
-    )
+def test_log_run_and_succeeded_periods(warehouse: Warehouse) -> None:
+    day = date(2026, 10, 21)
+    for source, status in [("ote", "failed"), ("cnb", "success")]:
+        warehouse.log_run(
+            run_id="r",
+            source=source,
+            business_date=day,
+            period_end=day,
+            status=status,
+            rows_loaded=0,
+            started_at=datetime.now(UTC),
+            error="boom" if status == "failed" else None,
+        )
 
     assert warehouse.con.execute(
-        "SELECT source, status, error FROM ops.pipeline_runs"
-    ).fetchall() == [("ote", "failed", "boom")]
+        "SELECT source, status, error FROM ops.pipeline_runs ORDER BY source"
+    ).fetchall() == [("cnb", "success", None), ("ote", "failed", "boom")]
+    assert warehouse.succeeded_periods() == {("cnb", day, day)}

@@ -109,3 +109,79 @@ def test_fetch_stations_falls_back_to_previous_day(load_fixture) -> None:
 
     with make_client() as client:
         assert chmi.fetch_stations(client, today)
+
+
+CSV_FIXTURE = "chmi/10m-0-20000-0-11520-T-202501.head.csv"
+HISTORICAL_PREFIX = f"{chmi.BASE_URL}/historical_csv/"
+RECENT_MONTH_PREFIX = f"{chmi.BASE_URL}/recent/data/10min/09/"
+MONTH_FIXTURE = "chmi/10m-0-20000-0-11520-202609.head.json"
+
+
+def test_parse_csv_observations(fixture_text) -> None:
+    observations = chmi.parse_csv_observations(fixture_text(CSV_FIXTURE), LIBUS)
+
+    assert len(observations) == 49
+    assert observations[0].observed_at == datetime(2025, 1, 1, tzinfo=UTC)
+    assert observations[0].value == -3.9
+    assert {o.source_folder for o in observations} == {"historical"}
+
+
+def test_parse_csv_rejects_other_header() -> None:
+    with pytest.raises(SourceFormatError, match="CSV header"):
+        chmi.parse_csv_observations("STATION,ELEMENT,DT,VAL\n", LIBUS)
+
+
+@respx.mock
+def test_range_uses_historical_csv_per_element(fixture_text) -> None:
+    template = fixture_text(CSV_FIXTURE)
+    for element, group in chmi.CSV_GROUPS.items():
+        url = chmi.HISTORICAL_CSV_URL.format(
+            group=group, month=date(2025, 1, 1), wsi=LIBUS, element=element
+        )
+        respx.get(url).mock(
+            return_value=httpx.Response(200, text=template.replace(",T,", f",{element},"))
+        )
+    other = respx.get(url__startswith=chmi.BASE_URL + "/recent/")
+
+    with make_client() as client:
+        observations = chmi.fetch_station_range(client, LIBUS, date(2025, 1, 1), date(2025, 1, 1))
+
+    assert {o.element for o in observations} == chmi.ELEMENTS
+    assert {o.source_folder for o in observations} == {"historical"}
+    assert not other.called
+
+
+@respx.mock
+def test_range_falls_back_to_recent_month(load_fixture) -> None:
+    historical = respx.get(url__startswith=HISTORICAL_PREFIX).mock(return_value=httpx.Response(404))
+    respx.get(url__startswith=RECENT_MONTH_PREFIX).mock(
+        return_value=httpx.Response(200, json=load_fixture(MONTH_FIXTURE))
+    )
+
+    with make_client() as client:
+        observations = chmi.fetch_station_range(client, LIBUS, date(2026, 9, 1), date(2026, 9, 1))
+
+    assert historical.call_count == 1  # the first element's 404 is enough
+    assert observations
+    assert {o.source_folder for o in observations} == {"recent"}
+    assert {o.observed_at.date() for o in observations} == {date(2026, 9, 1)}
+
+
+@respx.mock
+def test_range_falls_back_to_daily_files(day_file: dict) -> None:
+    respx.get(url__startswith=HISTORICAL_PREFIX).mock(return_value=httpx.Response(404))
+    respx.get(url__regex=r".*/recent/data/10min/\d\d/.*").mock(return_value=httpx.Response(404))
+    daily = respx.get(url__regex=r".*/recent/data/10min/10m-.*").mock(
+        return_value=httpx.Response(200, json=day_file)
+    )
+
+    with make_client() as client:
+        observations = chmi.fetch_station_range(client, LIBUS, DAY, DAY)
+
+    assert daily.call_count == 1
+    assert len(observations) == len(chmi.ELEMENTS) * 144
+
+
+def test_range_must_stay_within_a_month() -> None:
+    with make_client() as client, pytest.raises(ValueError, match="more than one month"):
+        chmi.fetch_station_range(client, LIBUS, date(2026, 9, 30), date(2026, 10, 1))

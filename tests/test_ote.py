@@ -98,3 +98,19 @@ def test_fetch_dam_requests_english_titles(load_fixture) -> None:
 
     assert route.called
     assert len(periods) == 96
+
+
+def test_parse_dam_accepts_known_incomplete_day(load_fixture) -> None:
+    day = date(2025, 7, 4)
+    periods = ote.parse_dam(load_fixture("ote/dam_2025-07-04_partial_12h.json"), day)
+
+    assert day in ote.KNOWN_INCOMPLETE_DAYS
+    assert [p.period for p in periods] == list(range(1, 13))
+
+
+def test_short_day_outside_the_allowlist_still_fails(load_fixture) -> None:
+    payload = copy.deepcopy(load_fixture("ote/dam_2025-07-04_partial_12h.json"))
+    payload["graph"]["title"] = "Day-Ahead Market Results - 05.07.2025"
+
+    with pytest.raises(SourceFormatError, match="12 periods, expected 24"):
+        ote.parse_dam(payload, date(2025, 7, 5))

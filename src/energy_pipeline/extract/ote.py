@@ -22,6 +22,12 @@ SERIES_BY_MTU: dict[int, set[str]] = {
     15: {VOLUME, QUARTER_PRICE, QUARTER_HOUR_REF},  # from 2025-10-01
 }
 
+# Days where OTE officially published only the first periods. These are the only days
+# allowed to be short; any other gap still fails the load. See docs/sources.md.
+KNOWN_INCOMPLETE_DAYS: dict[date, str] = {
+    date(2025, 7, 4): "official report marks hours 13-24 as 'ES'/'SN' instead of results",
+}
+
 
 class _Point(BaseModel):
     x: int
@@ -82,6 +88,9 @@ def parse_dam(payload: object, delivery_date: date) -> list[DamPeriod]:
         raise SourceFormatError(f"Unknown OTE series for {delivery_date}: {sorted(series)}")
 
     expected_periods = list(range(1, periods_in_day(delivery_date, mtu) + 1))
+    if delivery_date in KNOWN_INCOMPLETE_DAYS:
+        # Accept a contiguous run of periods from the start of the day.
+        expected_periods = expected_periods[: len(series[VOLUME])]
     for title, points in series.items():
         if sorted(points) != expected_periods:
             raise SourceFormatError(
