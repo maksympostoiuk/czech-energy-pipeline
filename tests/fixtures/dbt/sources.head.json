@@ -1,0 +1,27 @@
+{
+ "metadata": {
+  "invocation_id": "c9e7e92f-ccb2-493f-821c-8bb2b958cee8",
+  "generated_at": "2026-10-23T09:35:33.202645Z",
+  "dbt_version": "1.12.6"
+ },
+ "results": [
+  {
+   "unique_id": "source.czech_energy.raw.cnb_fx_rates",
+   "status": "pass",
+   "max_loaded_at_time_ago_in_s": 33027.544503,
+   "execution_time": 0.033364295959472656
+  },
+  {
+   "unique_id": "source.czech_energy.raw.chmi_observations",
+   "status": "pass",
+   "max_loaded_at_time_ago_in_s": 40146.957909,
+   "execution_time": 0.04340791702270508
+  },
+  {
+   "unique_id": "source.czech_energy.raw.ote_dam_results",
+   "status": "pass",
+   "max_loaded_at_time_ago_in_s": 40140.272184,
+   "execution_time": 0.04340791702270508
+  }
+ ]
+}

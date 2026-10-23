@@ -1,3 +1,5 @@
+{{ config(tags=['needs_history']) }}
+
 -- Reconciliation with the source of truth: OTE's official daily report (BASE / PEAK /
 -- OFFPEAK price indices and volumes) for sample days covering both market time units,
 -- all four kinds of DST day and a negative-price day. Returns the days that disagree.

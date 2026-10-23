@@ -1,0 +1,75 @@
+name: Backfill
+
+on:
+  workflow_dispatch:
+    inputs:
+      from:
+        description: First business date (YYYY-MM-DD)
+        required: true
+        default: "2024-01-01"
+      to:
+        description: Last business date (YYYY-MM-DD, empty = today)
+        required: false
+        default: ""
+      source:
+        description: Source to load
+        type: choice
+        options: [all, ote, cnb, chmi]
+        default: all
+      resume:
+        description: Skip periods that already loaded successfully
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: warehouse
+  cancel-in-progress: false
+
+env:
+  PIPELINE_ENV: prod
+  DBT_TARGET: prod
+  MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Backfill
+        env:
+          FROM: ${{ inputs.from }}
+          TO: ${{ inputs.to }}
+          SOURCE: ${{ inputs.source }}
+          RESUME: ${{ inputs.resume }}
+        run: |
+          args=(--from "$FROM")
+          [ -n "$TO" ] && args+=(--to "$TO")
+          [ "$SOURCE" != "all" ] && args+=(--source "$SOURCE")
+          [ "$RESUME" = "true" ] && args+=(--resume)
+          uv run pipeline backfill "${args[@]}"
+
+      # Incremental models only rebuild the last week, so history needs a full refresh.
+      - name: dbt build --full-refresh
+        working-directory: dbt
+        run: |
+          uv run dbt deps
+          uv run dbt build --full-refresh
+
+      - name: Record dbt results
+        if: always()
+        run: |
+          if [ -f dbt/target/run_results.json ]; then
+            uv run pipeline record-dbt-results dbt/target/run_results.json
+          fi

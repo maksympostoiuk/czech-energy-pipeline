@@ -1,0 +1,37 @@
+{
+ "metadata": {
+  "invocation_id": "2207ffa7-d8e2-4e11-beea-b4213594a91c",
+  "generated_at": "2026-10-23T09:33:56.417770Z",
+  "dbt_version": "1.12.6"
+ },
+ "results": [
+  {
+   "unique_id": "model.czech_energy.stg_chmi__stations",
+   "status": "success",
+   "failures": null,
+   "execution_time": 0.1665952205657959,
+   "message": "OK"
+  },
+  {
+   "unique_id": "seed.czech_energy.ote_known_incomplete_days",
+   "status": "success",
+   "failures": null,
+   "execution_time": 0.1365201473236084,
+   "message": "CREATE 1"
+  },
+  {
+   "unique_id": "test.czech_energy.dbt_expectations_expect_column_values_to_be_between_stg_cnb__fx_rates_rate_czk__0__True.810a3e7931",
+   "status": "pass",
+   "failures": 0,
+   "execution_time": 0.1228342056274414,
+   "message": null
+  },
+  {
+   "unique_id": "test.czech_energy.warn_chmi_values_outside_physical_range",
+   "status": "warn",
+   "failures": 1,
+   "execution_time": 0.37947583198547363,
+   "message": "Got 1 result, configured to warn if != 0"
+  }
+ ]
+}

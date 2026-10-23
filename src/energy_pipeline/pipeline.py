@@ -28,6 +28,9 @@ log = logging.getLogger(__name__)
 Source = Literal["ote", "cnb", "chmi"]
 SOURCES: tuple[Source, ...] = ("ote", "cnb", "chmi")
 CHMI_RELOAD_DAYS = 7  # quality-control corrections arrive in recent/ for about a week
+# A backfill loads ČNB from this many days earlier, so the first delivery days (e.g. the
+# 1 January holiday) have a preceding fixing to carry forward.
+CNB_BACKFILL_LOOKBACK_DAYS = 14
 
 
 @dataclass(frozen=True)
@@ -133,7 +136,8 @@ def backfill_tasks(start: date, end: date, sources: Iterable[Source] = SOURCES) 
         if source == "ote":
             tasks += [Task("ote", day) for day in Task("ote", start, end).days()]
         elif source == "cnb":
-            tasks += [Task("cnb", s, e) for s, e in _periods(start, end, _next_year)]
+            cnb_start = start - timedelta(days=CNB_BACKFILL_LOOKBACK_DAYS)
+            tasks += [Task("cnb", s, e) for s, e in _periods(cnb_start, end, _next_year)]
         else:
             tasks += [Task("chmi", s, e) for s, e in _periods(start, end, _next_month)]
     return tasks

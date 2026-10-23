@@ -105,3 +105,30 @@ def test_log_run_and_succeeded_periods(warehouse: Warehouse) -> None:
         "SELECT source, status, error FROM ops.pipeline_runs ORDER BY source"
     ).fetchall() == [("cnb", "success", None), ("ote", "failed", "boom")]
     assert warehouse.succeeded_periods() == {("cnb", day, day)}
+
+
+class _FakeConnection:
+    def __init__(self) -> None:
+        self.statements: list[str] = []
+
+    def execute(self, sql: str, *args: object) -> "_FakeConnection":
+        self.statements.append(" ".join(sql.split()))
+        return self
+
+
+def test_motherduck_creates_and_uses_the_database(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeConnection()
+    calls = []
+    monkeypatch.setattr(
+        "energy_pipeline.load.warehouse.duckdb.connect",
+        lambda database, config: calls.append((database, config)) or fake,
+    )
+
+    Warehouse("md:czech_energy", {"motherduck_token": "t"})
+
+    assert calls == [("md:", {"motherduck_token": "t"})]
+    assert fake.statements[:3] == [
+        "CREATE DATABASE IF NOT EXISTS czech_energy",
+        "USE czech_energy",
+        "SET TimeZone = 'UTC'",
+    ]

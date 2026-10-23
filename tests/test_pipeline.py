@@ -126,7 +126,7 @@ def test_backfill_tasks_chunk_per_source() -> None:
     assert len(by_source["ote"]) == 35
     assert all(t.until is None for t in by_source["ote"])
     assert by_source["cnb"] == [
-        Task("cnb", date(2024, 12, 30), date(2024, 12, 31)),
+        Task("cnb", date(2024, 12, 16), date(2024, 12, 31)),
         Task("cnb", date(2025, 1, 1), date(2025, 2, 2)),
     ]
     assert by_source["chmi"] == [

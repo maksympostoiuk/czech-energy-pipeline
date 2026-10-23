@@ -14,6 +14,8 @@ from typing import Self
 import duckdb
 import pyarrow as pa
 
+from energy_pipeline.config import Settings
+
 LOAD_COLUMNS = "_run_id VARCHAR NOT NULL, _ingested_at TIMESTAMPTZ NOT NULL"
 
 
@@ -78,7 +80,22 @@ CHMI_STATIONS = RawTable(
         begin_date DATE
     """,
 )
-RAW_TABLES = (OTE_DAM_RESULTS, CNB_FX_RATES, CHMI_OBSERVATIONS, CHMI_STATIONS)
+DBT_RESULTS = RawTable(
+    name="ops.dbt_results",
+    key=("invocation_id", "unique_id"),
+    columns="""
+        invocation_id VARCHAR NOT NULL,
+        generated_at TIMESTAMPTZ NOT NULL,
+        unique_id VARCHAR NOT NULL,
+        resource_type VARCHAR NOT NULL,
+        name VARCHAR NOT NULL,
+        status VARCHAR NOT NULL,
+        failures INTEGER,
+        execution_time_s DOUBLE,
+        message VARCHAR
+    """,
+)
+RAW_TABLES = (OTE_DAM_RESULTS, CNB_FX_RATES, CHMI_OBSERVATIONS, CHMI_STATIONS, DBT_RESULTS)
 
 PIPELINE_RUNS_DDL = """
 CREATE TABLE IF NOT EXISTS ops.pipeline_runs (
@@ -96,12 +113,24 @@ CREATE TABLE IF NOT EXISTS ops.pipeline_runs (
 
 
 class Warehouse:
-    def __init__(self, database: str) -> None:
-        if not database.startswith("md:") and database != ":memory:":
-            Path(database).parent.mkdir(parents=True, exist_ok=True)
-        self.con = duckdb.connect(database)
+    def __init__(self, database: str, config: dict[str, str] | None = None) -> None:
+        """database: a local file, ":memory:" or "md:<name>" for MotherDuck."""
+        if database.startswith("md:"):
+            # Connect to the account first: the database may not exist yet on a first run.
+            name = database.removeprefix("md:")
+            self.con = duckdb.connect("md:", config=config or {})
+            self.con.execute(f"CREATE DATABASE IF NOT EXISTS {name}")
+            self.con.execute(f"USE {name}")
+        else:
+            if database != ":memory:":
+                Path(database).parent.mkdir(parents=True, exist_ok=True)
+            self.con = duckdb.connect(database, config=config or {})
         self.con.execute("SET TimeZone = 'UTC'")
         self.create_schema()
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> Self:
+        return cls(settings.database, settings.duckdb_config)
 
     def __enter__(self) -> Self:
         return self

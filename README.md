@@ -1,5 +1,8 @@
 # Czech Energy Data Pipeline
 
+[![CI](https://github.com/maksympostoiuk/czech-energy-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/maksympostoiuk/czech-energy-pipeline/actions/workflows/ci.yml)
+[![Daily load](https://github.com/maksympostoiuk/czech-energy-pipeline/actions/workflows/daily.yml/badge.svg)](https://github.com/maksympostoiuk/czech-energy-pipeline/actions/workflows/daily.yml)
+
 Daily pipeline for the Czech electricity market: day-ahead prices from **OTE**, EUR/CZK rates from **ČNB** and weather observations from **ČHMÚ**, loaded with Python into DuckDB, modelled with **dbt** (staging → marts) with data quality tests, scheduled by **GitHub Actions** and visualised in **Streamlit**.
 
 > Work in progress. See [docs/PLAN.md](docs/PLAN.md) for the architecture and roadmap.
@@ -79,3 +82,27 @@ failure is caught, and failing staging tests stop the marts from being rebuilt.
 Real issues the tests surfaced: OTE published only hours 1–12 for 2025-07-04; OTE's own
 reports sum peak volume by hour position on hourly-market DST days; ČHMÚ delivered a
 physically impossible global radiation of 1673.7 W/m² flagged as good quality.
+
+## Production: MotherDuck + GitHub Actions
+
+| Workflow | Trigger | What it does |
+|---|---|---|
+| `ci.yml` | push to `main`, pull requests | ruff, pytest on stored API responses, `dbt build --empty` on an empty warehouse |
+| `daily.yml` | 14:00 UTC daily, manual | `pipeline daily` → `dbt source freshness` → `dbt build` on MotherDuck → results into `ops.dbt_results` |
+| `backfill.yml` | manual (from / to / source / resume) | `pipeline backfill` → `dbt build --full-refresh` |
+| `docs.yml` | changes in `dbt/`, manual | `dbt docs generate --static` → GitHub Pages |
+
+One-time setup:
+
+1. Create a MotherDuck account and an access token.
+2. In the repository, open Settings → Secrets and variables → Actions, and add the secret `MOTHERDUCK_TOKEN`.
+3. In Settings → Pages, set Source to **GitHub Actions**.
+4. Run **Backfill** once (Actions → Backfill → Run workflow, from `2024-01-01`), then **dbt docs**.
+
+The `md:czech_energy` database is created on the first run. MotherDuck currently supports
+DuckDB up to 1.5.x, so `duckdb` is pinned to `>=1.5.6,<1.6`. To run against MotherDuck
+locally, set `PIPELINE_ENV=prod` and `MOTHERDUCK_TOKEN` in `.env`, and use
+`DBT_TARGET=prod` for dbt.
+
+GitHub disables scheduled workflows after 60 days without repository activity; re-enable
+**Daily load** in the Actions tab if that happens.

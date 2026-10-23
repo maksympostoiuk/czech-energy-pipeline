@@ -5,7 +5,7 @@ description = "Daily ETL for the Czech electricity market: OTE day-ahead prices,
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "duckdb>=2.0.0",
+    "duckdb>=1.5.6,<1.6",
     "httpx>=0.28.1",
     "pyarrow>=26.0.0",
     "pydantic-settings>=2.6",

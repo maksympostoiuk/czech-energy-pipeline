@@ -1,0 +1,86 @@
+name: Daily load
+
+on:
+  schedule:
+    # 14:00 UTC = 15:00 CET / 16:00 CEST: after OTE (~13:00) and ČNB (14:30) publish.
+    - cron: "0 14 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One writer at a time: daily and backfill runs must not overlap on the warehouse.
+concurrency:
+  group: warehouse
+  cancel-in-progress: false
+
+env:
+  PIPELINE_ENV: prod
+  DBT_TARGET: prod
+  MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      # The steps below keep going after a failure, so one broken source still gets the
+      # other sources transformed and every result recorded; the last step fails the job.
+      - name: Extract and load (tomorrow's prices, FX, last week's weather)
+        id: load
+        continue-on-error: true
+        run: uv run pipeline daily
+
+      - name: dbt deps
+        working-directory: dbt
+        run: uv run dbt deps
+
+      - name: Source freshness
+        id: freshness
+        continue-on-error: true
+        working-directory: dbt
+        run: uv run dbt source freshness
+
+      - name: dbt build (models and data quality tests)
+        id: build
+        continue-on-error: true
+        working-directory: dbt
+        run: uv run dbt build
+
+      - name: Record dbt results in ops.dbt_results
+        if: always()
+        run: |
+          artifacts=()
+          for f in dbt/target/run_results.json dbt/target/sources.json; do
+            [ -f "$f" ] && artifacts+=("$f")
+          done
+          if [ ${#artifacts[@]} -gt 0 ]; then
+            uv run pipeline record-dbt-results "${artifacts[@]}"
+          fi
+
+      - name: Upload dbt artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dbt-artifacts-${{ github.run_id }}
+          path: |
+            dbt/target/run_results.json
+            dbt/target/sources.json
+            dbt/logs/dbt.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Fail the run if any step failed
+        if: steps.load.outcome == 'failure' || steps.freshness.outcome == 'failure' || steps.build.outcome == 'failure'
+        run: |
+          echo "load=${{ steps.load.outcome }} freshness=${{ steps.freshness.outcome }} build=${{ steps.build.outcome }}"
+          exit 1

@@ -31,3 +31,5 @@ sources:
     tables:
       - name: pipeline_runs
         description: One row per extract + load task, written by the pipeline CLI.
+      - name: dbt_results
+        description: dbt test, model and source freshness results, recorded after every scheduled run.

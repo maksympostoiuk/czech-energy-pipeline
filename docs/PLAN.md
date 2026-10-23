@@ -132,10 +132,14 @@ flowchart LR
 
 ### 3.4 CI/CD
 
-- **`ci.yml`** (на каждый push/PR): `ruff` → `pytest` (на сохранённых фикстурах, без сети) → `sqlfluff lint` → `dbt build --target ci` на локальной DuckDB с seed-данными.
-- **`daily.yml`** (cron `0 14 * * *` UTC, то есть 15:00 CET / 16:00 CEST, когда OTE и ČNB уже опубликованы, + ручной запуск с датой): extract → load → `dbt source freshness` → `dbt build --target prod` → загрузка артефактов dbt.
-- **`docs.yml`**: `dbt docs generate` → GitHub Pages (lineage-граф будет виден прямо по ссылке).
-- Секреты: `MOTHERDUCK_TOKEN` в GitHub Secrets и в настройках Streamlit Cloud (read-only токен).
+- **`ci.yml`** (каждый push в main и каждый PR): `ruff check` + `ruff format --check` → `pytest` (на сохранённых реальных ответах API, без сети) → `pipeline init` + `dbt build --empty` на пустой DuckDB: все модели и тесты выполняются на нуле строк, что проверяет SQL без данных. Тесты, зависящие от времени (`tag:freshness`) и от истории (`tag:needs_history`), исключены.
+- **`daily.yml`** (cron `0 14 * * *` UTC = 15:00 CET / 16:00 CEST, когда OTE и ČNB уже опубликованы, + ручной запуск): `pipeline daily` → `dbt source freshness` → `dbt build` (target prod, MotherDuck) → `pipeline record-dbt-results` (результаты в `ops.dbt_results` для страницы Data Quality) → артефакты dbt. Шаги идут дальше после ошибки, чтобы всё было записано, а последний шаг роняет job, если упал любой из предыдущих.
+- **`backfill.yml`** (ручной запуск с параметрами from/to/source/resume): `pipeline backfill` → `dbt build --full-refresh`.
+- **`docs.yml`** (push в `dbt/**` + ручной запуск): `dbt docs generate --static` по продовой базе → GitHub Pages.
+- `concurrency: warehouse` не даёт daily и backfill писать в базу одновременно.
+- Секреты: `MOTHERDUCK_TOKEN` в GitHub Secrets (и read-only токен в Streamlit Cloud на этапе 7).
+
+> **Совместимость:** MotherDuck поддерживает DuckDB только до 1.5.6, поэтому `duckdb` закреплён на `>=1.5.6,<1.6`. Локальная база, созданная DuckDB 2.0 (формат файла v69), была перенесена через Parquet. На Windows с кириллицей в имени пользователя расширение MotherDuck не может скачать компоненты в `~/.duckdb`, поэтому есть `PIPELINE_DUCKDB_EXTENSION_DIRECTORY` (на Linux-раннерах не нужно).
 
 ### 3.5 Дашборд (Streamlit)
 
@@ -205,7 +209,7 @@ czech-energy-pipeline/
 - Намеренно «сломать» данные и убедиться, что тесты падают.
 - **Готово, когда:** каждая модель в marts покрыта тестами, freshness настроен.
 
-### Этап 6. Продакшн-хранилище и оркестрация (~1 день)
+### Этап 6. Продакшн-хранилище и оркестрация (~1 день): код готов, ждёт секретов и первого облачного запуска
 - Аккаунт MotherDuck, target `prod` в `profiles.yml`.
 - `ci.yml`, `daily.yml`, `docs.yml`, секреты.
 - **Готово, когда:** ежедневный запуск 3 дня подряд проходит без ручного вмешательства.

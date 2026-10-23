@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Lint
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Unit tests (stored real API responses, no network)
+        run: uv run pytest
+
+      - name: dbt build on an empty warehouse
+        # --empty runs every model and test with zero input rows: it proves the SQL compiles
+        # and executes without needing data. Wall-clock (freshness) checks and the
+        # reconciliation with OTE reports need real history and run in the daily job.
+        env:
+          PIPELINE_DUCKDB_PATH: ${{ runner.temp }}/ci.duckdb
+          DBT_DUCKDB_PATH: ${{ runner.temp }}/ci.duckdb
+        run: |
+          uv run pipeline init
+          cd dbt
+          uv run dbt deps
+          uv run dbt build --empty --exclude tag:freshness tag:needs_history
