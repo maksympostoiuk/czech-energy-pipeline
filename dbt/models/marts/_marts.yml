@@ -35,6 +35,15 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: [delivery_date, period]
+      - dbt_utils.expression_is_true:
+          name: hour_reference_price_only_in_15min_market
+          arguments:
+            expression: "(mtu_minutes = 15) = (price_60min_ref_eur_mwh is not null)"
+      - dbt_utils.expression_is_true:
+          name: fx_rate_at_most_a_week_old
+          arguments:
+            # Christmas + a weekend can leave 5-6 days without a fixing; 7 means a broken load.
+            expression: "delivery_date - fixing_valid_for <= 7"
     columns:
       - name: delivery_date
         data_tests:
@@ -72,6 +81,15 @@ models:
     description: >
       Hourly prices for the whole history: hourly MTUs as is, 15-minute MTUs averaged.
       Grain is the UTC hour, so the repeated local 02:00 on the autumn DST day is two rows.
+    data_tests:
+      - dbt_utils.expression_is_true:
+          name: every_hour_fully_covered_by_its_periods
+          arguments:
+            expression: "periods * mtu_minutes = 60"
+      - dbt_utils.expression_is_true:
+          name: hourly_price_within_its_period_range
+          arguments:
+            expression: "price_eur_mwh between min_price_eur_mwh - 0.01 and max_price_eur_mwh + 0.01"
     columns:
       - name: hour_start_utc
         data_tests: [unique, not_null]
@@ -85,9 +103,24 @@ models:
     description: >
       One row per delivery day. base / peak / off-peak reproduce OTE's official daily
       indices (checked against the published reports to the cent).
+    data_tests:
+      - dbt_utils.expression_is_true:
+          name: every_day_complete_unless_officially_partial
+          arguments:
+            expression: "is_complete or is_known_incomplete"
+      - dbt_utils.expression_is_true:
+          name: base_price_between_daily_min_and_max
+          arguments:
+            expression: "base_price_eur_mwh between min_price_eur_mwh and max_price_eur_mwh"
     columns:
       - name: delivery_date
-        data_tests: [unique, not_null]
+        data_tests:
+          - unique
+          - not_null
+          - dbt_utils.sequential_values:
+              arguments:
+                interval: 1
+                datepart: day
       - name: periods
       - name: expected_periods
         description: hours_in_day × 60 / mtu_minutes.

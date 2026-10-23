@@ -72,6 +72,11 @@ results. Such days are listed in `ote.KNOWN_INCOMPLETE_DAYS`, where a contiguous
 the start of the day is accepted. Any other short day still fails the load. dbt must exclude the
 same list from its period-count test.
 
+**Report quirk on DST days before 2025-10-01.** In OTE's daily XLSX report, PEAK/OFFPEAK
+prices use wall-clock 08:00–20:00. PEAK/OFFPEAK volumes on 23/25-hour days, however, are summed
+over hour positions 9–20. This project uses wall-clock time for both, so the reconciliation test
+skips those two volume checks on hourly-market DST days.
+
 **Not yet published.** A future date returns HTTP `200` with `"dataLine": []`. That is "not published
 yet", not an error and not zero prices.
 
@@ -158,6 +163,11 @@ recovered from `recent/` for the current year.
 
 Values are quality-checked after publication. The daily run therefore re-loads a rolling window of
 recent days from `recent/`, and the idempotent upsert replaces earlier unchecked values.
+
+**Physically impossible values exist.** For example, Holešov on 2026-09-22 at 09:50 UTC reported
+global radiation of 1673.7 W/m² with quality 0 ("good"), which is above the solar constant.
+Physical bounds per measure live in the dbt seed `chmi_measure_ranges`. Values outside them are
+excluded from aggregates and listed by a warn-level test.
 
 **Elements we keep** (10-minute; the hourly `1h` files do not contain T or F)
 

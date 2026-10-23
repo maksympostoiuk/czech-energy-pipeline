@@ -17,6 +17,12 @@ vars:
   # OTE peak load is 08:00-20:00 local time on every day, as in its daily report.
   peak_start_hour: 8
   peak_end_hour: 20
+  # SDAC harmonised minimum / maximum clearing price. The maximum can be raised
+  # automatically after price spikes, so it lives here and not inside tests.
+  sdac_min_price_eur_mwh: -500
+  sdac_max_price_eur_mwh: 4000
+  # Used by dbt_date / dbt_expectations for "now" in recency tests.
+  "dbt_date:time_zone": Europe/Prague
 
 models:
   czech_energy:

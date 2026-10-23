@@ -1,0 +1,7 @@
+measure,min_value,max_value,note
+temperature_c,-45,45,"Czech records: -42.2 °C (1929), 40.4 °C (2012)"
+wind_speed_ms,0,60,"10-minute mean wind speed"
+global_radiation_wm2,0,1400,"10-minute mean; above the solar constant (1361) is impossible at the surface"
+sunshine_s,0,600,"seconds of sunshine within 10 minutes"
+precipitation_mm,0,60,"10-minute sum"
+relative_humidity_pct,0,100,"percent"

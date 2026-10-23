@@ -7,6 +7,13 @@ sources:
       source rows plus _run_id and _ingested_at. Loads are idempotent upserts on the natural
       keys, so these tables never hold duplicates by design (tested in staging).
     schema: raw
+    config:
+      # The daily run loads every source every day (ČNB too: on weekends it re-loads the
+      # last fixing), so a load older than a day means the schedule is broken.
+      loaded_at_field: _ingested_at
+      freshness:
+        warn_after: {count: 26, period: hour}
+        error_after: {count: 50, period: hour}
     tables:
       - name: ote_dam_results
         description: OTE day-ahead market results for the CZ bidding zone, one row per MTU period.
@@ -16,6 +23,8 @@ sources:
         description: ČHMÚ 10-minute observations of the selected stations and elements, long format.
       - name: chmi_stations
         description: Snapshot of ČHMÚ station metadata (meta1), all stations.
+        config:
+          freshness: null
 
   - name: ops
     schema: ops

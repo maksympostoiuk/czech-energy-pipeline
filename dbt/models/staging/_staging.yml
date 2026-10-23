@@ -9,10 +9,21 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: [delivery_date, period]
+      - dbt_expectations.expect_column_pair_values_A_to_be_greater_than_B:
+          arguments:
+            column_A: interval_end_utc
+            column_B: interval_start_utc
     columns:
       - name: delivery_date
         description: Delivery day in Europe/Prague.
-        data_tests: [not_null]
+        data_tests:
+          - not_null
+          - dbt_expectations.expect_row_values_to_have_recent_data:
+              arguments:
+                datepart: day
+                interval: 1
+              config:
+                tags: [freshness]
       - name: period
         description: 1-based MTU index within the delivery day (local time).
         data_tests: [not_null]
@@ -30,11 +41,21 @@ models:
         description: Start of the MTU as Prague wall-clock time (repeats on the autumn DST day).
       - name: price_eur_mwh
         description: Clearing price in EUR/MWh (15-minute price from 2025-10-01).
-        data_tests: [not_null]
+        data_tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: "{{ var('sdac_min_price_eur_mwh') }}"
+                max_value: "{{ var('sdac_max_price_eur_mwh') }}"
       - name: price_60min_ref_eur_mwh
         description: OTE's hourly reference price, repeated on each quarter; null before 2025-10-01.
       - name: volume_mwh
         description: Traded volume in MWh per MTU (not per hour).
+        data_tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
       - name: ingested_at
 
   - name: stg_cnb__fx_rates
@@ -46,7 +67,14 @@ models:
     columns:
       - name: valid_for
         description: Day the fixing is valid for (also returned for later non-business days by the API).
-        data_tests: [not_null]
+        data_tests:
+          - not_null
+          - dbt_expectations.expect_row_values_to_have_recent_data:
+              arguments:
+                datepart: day
+                interval: 5  # Christmas and Easter leave up to 4 days without a fixing
+              config:
+                tags: [freshness]
       - name: currency_code
         data_tests: [not_null]
       - name: amount
@@ -55,7 +83,18 @@ models:
         description: Rate as published, CZK per `amount` units.
       - name: rate_czk
         description: CZK per 1 unit of the currency.
-        data_tests: [not_null]
+        data_tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+                strictly: true
+          - dbt_expectations.expect_column_values_to_be_between:
+              name: eur_czk_within_plausible_band
+              arguments:
+                min_value: 20
+                max_value: 30
+                row_condition: "currency_code = 'EUR'"
       - name: ingested_at
 
   - name: stg_chmi__observations
@@ -78,7 +117,15 @@ models:
       - name: chmi_element
         description: Original ČHMÚ element code (T, F, RGLB10, SSV10M, SRA10M, H).
       - name: observed_at_utc
-        data_tests: [not_null]
+        data_tests:
+          - not_null
+          - dbt_expectations.expect_row_values_to_have_recent_data:
+              arguments:
+                datepart: hour
+                interval: 30
+              config:
+                tags: [freshness]
+                severity: warn
       - name: value
         description: Measured value; null when ČHMÚ marks it missing.
       - name: quality
@@ -87,8 +134,10 @@ models:
           - accepted_values:
               arguments:
                 values: [0, 1, 2, 3, 4, 5]
+      - name: is_plausible
+        description: Value within the physical range of seed chmi_measure_ranges.
       - name: is_usable
-        description: Value present and quality in var('chmi_usable_quality').
+        description: Value present, quality in var('chmi_usable_quality') and physically plausible.
       - name: source_folder
         description: historical (archive CSV), recent (quality-checked) or now (fresh, unchecked).
       - name: ingested_at
