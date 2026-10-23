@@ -18,12 +18,19 @@ dependencies = [
 pipeline = "energy_pipeline.cli:main"
 
 [dependency-groups]
+dbt = [
+    "dbt-core>=1.12.6",
+    "dbt-duckdb>=1.11.0",
+]
 dev = [
     "pre-commit>=4.0",
     "pytest>=8.3",
     "respx>=0.23.1",
     "ruff>=0.8",
 ]
+
+[tool.uv]
+default-groups = ["dev", "dbt"]
 
 [build-system]
 requires = ["hatchling"]

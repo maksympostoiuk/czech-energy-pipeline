@@ -1,0 +1,18 @@
+# Run dbt from this directory:  cd dbt && uv run dbt build
+# Secrets never live here: MotherDuck reads MOTHERDUCK_TOKEN from the environment.
+czech_energy:
+  target: "{{ env_var('DBT_TARGET', 'local') }}"
+  outputs:
+    local:
+      type: duckdb
+      path: "{{ env_var('DBT_DUCKDB_PATH', '../data/warehouse.duckdb') }}"
+      threads: 4
+      settings:
+        # The loader writes UTC; without this DuckDB uses the machine's zone for casts.
+        TimeZone: UTC
+    prod:
+      type: duckdb
+      path: "md:{{ env_var('PIPELINE_MOTHERDUCK_DATABASE', 'czech_energy') }}"
+      threads: 4
+      settings:
+        TimeZone: UTC

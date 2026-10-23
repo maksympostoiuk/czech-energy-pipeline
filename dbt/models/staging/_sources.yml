@@ -1,0 +1,24 @@
+version: 2
+
+sources:
+  - name: raw
+    description: >
+      Written only by the Python loader (src/energy_pipeline/load/warehouse.py): validated
+      source rows plus _run_id and _ingested_at. Loads are idempotent upserts on the natural
+      keys, so these tables never hold duplicates by design (tested in staging).
+    schema: raw
+    tables:
+      - name: ote_dam_results
+        description: OTE day-ahead market results for the CZ bidding zone, one row per MTU period.
+      - name: cnb_fx_rates
+        description: ČNB exchange rate fixing, all currencies, business days only.
+      - name: chmi_observations
+        description: ČHMÚ 10-minute observations of the selected stations and elements, long format.
+      - name: chmi_stations
+        description: Snapshot of ČHMÚ station metadata (meta1), all stations.
+
+  - name: ops
+    schema: ops
+    tables:
+      - name: pipeline_runs
+        description: One row per extract + load task, written by the pipeline CLI.

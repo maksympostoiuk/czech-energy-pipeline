@@ -1,0 +1,39 @@
+version: 2
+
+seeds:
+  - name: czech_public_holidays
+    description: >
+      Czech public holidays (státní svátky and ostatní svátky) 2024–2027. Verified against
+      the ČNB calendar: weekdays without an exchange rate fixing are exactly these days.
+    config:
+      column_types:
+        holiday_date: date
+    columns:
+      - name: holiday_date
+        data_tests: [unique, not_null]
+      - name: name_cs
+      - name: name_en
+
+  - name: chmi_stations_selected
+    description: >
+      The 8 ČHMÚ stations the pipeline loads (src/energy_pipeline/extract/chmi.py STATIONS),
+      one per region, each measuring temperature, wind and global radiation.
+    columns:
+      - name: station_id
+        description: WIGOS station identifier (WSI).
+        data_tests: [unique, not_null]
+      - name: short_name
+      - name: region
+        description: Czech region (kraj) the station represents.
+
+  - name: ote_known_incomplete_days
+    description: >
+      Delivery days OTE officially published only partly. Must match
+      ote.KNOWN_INCOMPLETE_DAYS in the Python extractor (checked by a pytest test).
+    config:
+      column_types:
+        delivery_date: date
+    columns:
+      - name: delivery_date
+        data_tests: [unique, not_null]
+      - name: reason

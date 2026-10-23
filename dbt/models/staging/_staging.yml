@@ -1,0 +1,109 @@
+version: 2
+
+models:
+  - name: stg_ote__dam_prices
+    description: >
+      OTE day-ahead market results with clock times. One row per market time unit (MTU):
+      60 minutes up to 2025-09-30, 15 minutes from 2025-10-01.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [delivery_date, period]
+    columns:
+      - name: delivery_date
+        description: Delivery day in Europe/Prague.
+        data_tests: [not_null]
+      - name: period
+        description: 1-based MTU index within the delivery day (local time).
+        data_tests: [not_null]
+      - name: mtu_minutes
+        description: Length of the market time unit, 60 or 15.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [15, 60]
+      - name: interval_start_utc
+        description: Start of the MTU, derived from local midnight so DST days are correct.
+        data_tests: [unique, not_null]
+      - name: interval_end_utc
+      - name: interval_start_local
+        description: Start of the MTU as Prague wall-clock time (repeats on the autumn DST day).
+      - name: price_eur_mwh
+        description: Clearing price in EUR/MWh (15-minute price from 2025-10-01).
+        data_tests: [not_null]
+      - name: price_60min_ref_eur_mwh
+        description: OTE's hourly reference price, repeated on each quarter; null before 2025-10-01.
+      - name: volume_mwh
+        description: Traded volume in MWh per MTU (not per hour).
+      - name: ingested_at
+
+  - name: stg_cnb__fx_rates
+    description: ČNB fixing, all currencies, business days only.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [valid_for, currency_code]
+    columns:
+      - name: valid_for
+        description: Day the fixing is valid for (also returned for later non-business days by the API).
+        data_tests: [not_null]
+      - name: currency_code
+        data_tests: [not_null]
+      - name: amount
+        description: Number of currency units the published rate refers to (1, 100 or 1000).
+      - name: rate_per_amount_czk
+        description: Rate as published, CZK per `amount` units.
+      - name: rate_czk
+        description: CZK per 1 unit of the currency.
+        data_tests: [not_null]
+      - name: ingested_at
+
+  - name: stg_chmi__observations
+    description: ČHMÚ 10-minute observations in long format with readable measure names.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [station_id, chmi_element, observed_at_utc]
+    columns:
+      - name: station_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('chmi_stations_selected')
+                field: station_id
+      - name: measure
+        description: Readable name with unit, e.g. temperature_c or global_radiation_wm2.
+        data_tests: [not_null]
+      - name: chmi_element
+        description: Original ČHMÚ element code (T, F, RGLB10, SSV10M, SRA10M, H).
+      - name: observed_at_utc
+        data_tests: [not_null]
+      - name: value
+        description: Measured value; null when ČHMÚ marks it missing.
+      - name: quality
+        description: ČHMÚ quality code (0 good, 1 suspect, 2 poor, 3 estimated, 4 missing, 5 not checked).
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [0, 1, 2, 3, 4, 5]
+      - name: is_usable
+        description: Value present and quality in var('chmi_usable_quality').
+      - name: source_folder
+        description: historical (archive CSV), recent (quality-checked) or now (fresh, unchecked).
+      - name: ingested_at
+
+  - name: stg_chmi__stations
+    description: Latest ČHMÚ station metadata, one row per station.
+    columns:
+      - name: station_id
+        data_tests: [unique, not_null]
+
+  - name: stg_ops__pipeline_runs
+    description: Extract + load task log with durations, for monitoring.
+    columns:
+      - name: status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [success, no_data, failed]

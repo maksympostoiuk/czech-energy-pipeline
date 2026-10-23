@@ -87,24 +87,27 @@ flowchart LR
 
 > **Часовой пояс:** DuckDB по умолчанию берёт TimeZone компьютера (у нас Europe/Prague), поэтому `observed_at::date` даёт местную дату, а не UTC. Загрузчик и dbt явно ставят `SET TimeZone = 'UTC'`, а локальное время считается только явным `AT TIME ZONE 'Europe/Prague'`.
 
-**`staging`** (dbt, view): одна модель на одну сырую таблицу. Переименование, типы, единицы измерения, таймзоны (локальное время Europe/Prague → UTC + local), дедупликация.
+**`reference`** (dbt seeds): `czech_public_holidays` (сверено с календарём ČNB: будни без фиксинга = праздники), `chmi_stations_selected`, `ote_known_incomplete_days`. Совпадение двух последних со списками в Python проверяет pytest.
 
-- `stg_ote__dam_prices`, `stg_cnb__fx_rates`, `stg_chmi__observations`, `stg_chmi__stations`
+**`staging`** (dbt, view): одна модель на одну сырую таблицу. Переименование, типы, единицы измерения, часовые пояса (местное время Europe/Prague → UTC + local), дедупликация.
 
-**`intermediate`** (dbt, ephemeral/view): бизнес-логика.
+- `stg_ote__dam_prices`, `stg_cnb__fx_rates`, `stg_chmi__observations`, `stg_chmi__stations`, `stg_ops__pipeline_runs`
 
-- `int_fx_rates_daily_filled`: календарь × курс с forward-fill на выходные и праздники
-- `int_dam_prices_czk`: 15-минутные цены, пересчитанные в CZK/MWh
-- `int_weather_hourly_cz`: 10-минутные наблюдения → часовые агрегаты по станциям → среднее по ЧР
+**`intermediate`** (dbt, view): бизнес-логика.
+
+- `int_fx_eur_czk_daily`: календарь × курс EUR/CZK с forward-fill на выходные, праздники и «завтра»
+- `int_dam_prices_czk`: цены в CZK/MWh, местный час, флаг peak (08:00–20:00)
+- `int_weather_hourly_station`: 10-минутные наблюдения → часовые агрегаты по станции
+- `int_weather_hourly_cz`: среднее 8 станций по часу, национальный погодный сигнал
 
 **`marts`** (dbt, table/incremental): то, что читает дашборд.
 
-- `dim_date`: календарь, выходные, чешские госпраздники, сезон
-- `dim_station`: станции с координатами
-- `fct_dam_price_15min`: зерно = один 15-минутный интервал (incremental)
-- `fct_dam_price_hourly`: агрегация до часа для сравнения с историей до 10/2025
-- `fct_daily_market_summary`: base/peak/off-peak, min/max, спред, число отрицательных интервалов, курс, средняя погода
-- `mart_price_vs_weather`: часовая цена + температура/ветер/солнце для анализа корреляций
+- `dim_date`: календарь 2024–2027, госпраздники, сезон, длина дня (23/24/25 часов)
+- `dim_station`: станции с регионом и координатами
+- `fct_dam_prices`: зерно = один MTU, как торговался (60 мин до 30.09.2025, 15 мин после); incremental (delete+insert, перестраиваются последние 7 дней)
+- `fct_dam_prices_hourly`: вся история в часовом зерне (по UTC-часу, поэтому повторный осенний 02:00 остаётся отдельной строкой)
+- `fct_daily_market_summary`: base/peak/off-peak (до цента совпадают с официальными индексами OTE), min/max, спред, отрицательные цены, объём, курс, погода дня, флаги полноты
+- `mart_price_vs_weather`: часовая цена + температура/ветер/радиация/солнце для анализа корреляций
 
 ### 3.3 Качество данных
 
@@ -182,7 +185,7 @@ czech-energy-pipeline/
 - Итог: 1 027 дней цен (+ известный неполный день 04.07.2025), 21 713 курсов, 7,1 млн метеонаблюдений; файл DuckDB ~46 МБ, около 12 минут.
 - **Готово, когда:** в базе ~2+ года истории (часовые цены до 10/2025, 15-минутные после).
 
-### Этап 4. dbt-модели (~3 дня)
+### Этап 4. dbt-модели (~3 дня): ✅ готово
 - Sources + freshness → staging → intermediate → marts, seeds с чешскими праздниками.
 - Инкрементальная `fct_dam_price_15min`, документация каждой колонки в `.yml`.
 - **Готово, когда:** `dbt build` зелёный, `dbt docs` показывает полный lineage.

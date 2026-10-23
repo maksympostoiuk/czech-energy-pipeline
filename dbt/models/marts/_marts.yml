@@ -1,0 +1,126 @@
+version: 2
+
+models:
+  - name: dim_date
+    description: Calendar 2024–2027 with Czech public holidays, seasons and DST day length.
+    columns:
+      - name: date_day
+        data_tests: [unique, not_null]
+      - name: day_of_week
+        description: ISO day of week, 1 = Monday.
+      - name: is_holiday
+        description: Czech public holiday (seed czech_public_holidays).
+      - name: is_business_day
+        description: Weekday that is not a public holiday (ČNB publishes a fixing).
+      - name: season
+        description: Meteorological season (winter = Dec–Feb).
+      - name: hours_in_day
+        description: 24, or 23 / 25 on the days Prague switches to / from summer time.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [23, 24, 25]
+
+  - name: dim_station
+    description: The 8 weather stations with region and coordinates.
+    columns:
+      - name: station_id
+        data_tests: [unique, not_null]
+
+  - name: fct_dam_prices
+    description: >
+      Day-ahead price per market time unit, in EUR and CZK, with UTC and local times.
+      Incremental (delete+insert on delivery_date + period, last 7 days rebuilt).
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [delivery_date, period]
+    columns:
+      - name: delivery_date
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_day
+      - name: period
+        description: 1-based MTU index within the delivery day.
+      - name: mtu_minutes
+        description: 60 until 2025-09-30, 15 from 2025-10-01.
+      - name: interval_start_utc
+        data_tests: [unique, not_null]
+      - name: interval_end_utc
+      - name: interval_start_local
+      - name: hour_start_utc
+        description: UTC hour the interval belongs to (join key to hourly weather).
+      - name: local_hour
+        description: Prague wall-clock hour, 0–23.
+      - name: is_peak
+        description: 08:00–20:00 Prague time, OTE's peak load definition (every day).
+      - name: price_eur_mwh
+        data_tests: [not_null]
+      - name: price_czk_mwh
+        data_tests: [not_null]
+      - name: price_60min_ref_eur_mwh
+      - name: volume_mwh
+      - name: is_negative_price
+      - name: eur_czk
+        description: ČNB EUR/CZK applied (last fixing on or before the delivery day).
+      - name: fixing_valid_for
+
+  - name: fct_dam_prices_hourly
+    description: >
+      Hourly prices for the whole history: hourly MTUs as is, 15-minute MTUs averaged.
+      Grain is the UTC hour, so the repeated local 02:00 on the autumn DST day is two rows.
+    columns:
+      - name: hour_start_utc
+        data_tests: [unique, not_null]
+      - name: periods
+        description: MTU periods in the hour (1 before 2025-10-01, 4 after).
+      - name: min_price_eur_mwh
+        description: Lowest quarter-hour price within the hour (equals the price for hourly MTU).
+      - name: max_price_eur_mwh
+
+  - name: fct_daily_market_summary
+    description: >
+      One row per delivery day. base / peak / off-peak reproduce OTE's official daily
+      indices (checked against the published reports to the cent).
+    columns:
+      - name: delivery_date
+        data_tests: [unique, not_null]
+      - name: periods
+      - name: expected_periods
+        description: hours_in_day × 60 / mtu_minutes.
+      - name: is_complete
+        description: All expected MTU periods are present.
+      - name: is_known_incomplete
+        description: Listed in seed ote_known_incomplete_days (officially partial).
+      - name: base_price_eur_mwh
+        description: Mean price 00:00–24:00 (OTE BASE LOAD index).
+      - name: peak_price_eur_mwh
+        description: Mean price 08:00–20:00 (OTE PEAK LOAD index).
+      - name: offpeak_price_eur_mwh
+        description: Mean price outside 08:00–20:00 (OTE OFFPEAK LOAD index).
+      - name: price_spread_eur_mwh
+        description: Max minus min MTU price; a proxy for the value of flexibility and storage.
+      - name: negative_price_periods
+      - name: negative_price_hours
+        description: Hours of the day with a negative price.
+      - name: volume_mwh
+        description: Total traded volume of the day.
+      - name: eur_czk
+      - name: base_price_czk_mwh
+      - name: avg_temperature_c
+      - name: avg_wind_speed_ms
+      - name: avg_global_radiation_wm2
+      - name: sunshine_hours
+        description: Mean sunshine duration across the 8 stations.
+      - name: precipitation_mm
+      - name: weather_hours
+        description: Local hours with weather data (lower for today and tomorrow).
+
+  - name: mart_price_vs_weather
+    description: Hourly price joined to the national weather signal, for correlation analysis.
+    columns:
+      - name: hour_start_utc
+        data_tests: [unique, not_null]

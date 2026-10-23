@@ -1,0 +1,35 @@
+name: czech_energy
+version: "1.0.0"
+config-version: 2
+profile: czech_energy
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  # ČHMÚ quality codes kept for analysis: 0 good, 1 suspect, 3 estimated,
+  # 5 not checked yet. 2 (poor) and 4 (missing) are dropped. See docs/sources.md.
+  chmi_usable_quality: [0, 1, 3, 5]
+  # OTE peak load is 08:00-20:00 local time on every day, as in its daily report.
+  peak_start_hour: 8
+  peak_end_hour: 20
+
+models:
+  czech_energy:
+    staging:
+      +schema: staging
+      +materialized: view
+    intermediate:
+      +schema: intermediate
+      +materialized: view
+    marts:
+      +schema: marts
+      +materialized: table
+
+seeds:
+  czech_energy:
+    +schema: reference

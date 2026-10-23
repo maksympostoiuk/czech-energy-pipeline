@@ -1,0 +1,40 @@
+version: 2
+
+models:
+  - name: int_fx_eur_czk_daily
+    description: >
+      EUR/CZK for every calendar day up to the last OTE delivery day; weekends, holidays
+      and "tomorrow" carry the last ČNB fixing forward.
+    columns:
+      - name: date_day
+        data_tests: [unique, not_null]
+      - name: eur_czk
+        description: CZK per 1 EUR applicable on the day.
+        data_tests: [not_null]
+      - name: fixing_valid_for
+        description: The ČNB fixing day the rate comes from.
+      - name: is_fixing_day
+        description: True when ČNB published a fixing for this very day.
+
+  - name: int_dam_prices_czk
+    description: Day-ahead prices converted to CZK, with local hour and the peak flag.
+    columns:
+      - name: is_peak
+        description: Interval starts between 08:00 and 20:00 Prague time (OTE peak load).
+      - name: price_czk_mwh
+        description: price_eur_mwh × eur_czk of the delivery day.
+
+  - name: int_weather_hourly_station
+    description: Usable 10-minute observations pivoted to one row per station and UTC hour.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [station_id, hour_start_utc]
+
+  - name: int_weather_hourly_cz
+    description: Unweighted mean of the 8 stations per UTC hour, a national weather signal.
+    columns:
+      - name: hour_start_utc
+        data_tests: [unique, not_null]
+      - name: reporting_stations
+        description: Number of stations with usable data in the hour (8 when complete).
