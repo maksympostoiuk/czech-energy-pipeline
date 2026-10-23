@@ -133,7 +133,7 @@ flowchart LR
 ### 3.4 CI/CD
 
 - **`ci.yml`** (каждый push в main и каждый PR): `ruff check` + `ruff format --check` → `pytest` (на сохранённых реальных ответах API, без сети) → `pipeline init` + `dbt build --empty` на пустой DuckDB: все модели и тесты выполняются на нуле строк, что проверяет SQL без данных. Тесты, зависящие от времени (`tag:freshness`) и от истории (`tag:needs_history`), исключены.
-- **`daily.yml`** (cron `0 14 * * *` UTC = 15:00 CET / 16:00 CEST, когда OTE и ČNB уже опубликованы, + ручной запуск): `pipeline daily` → `dbt source freshness` → `dbt build` (target prod, MotherDuck) → `pipeline record-dbt-results` (результаты в `ops.dbt_results` для страницы Data Quality) → артефакты dbt. Шаги идут дальше после ошибки, чтобы всё было записано, а последний шаг роняет job, если упал любой из предыдущих.
+- **`daily.yml`** (cron `17 14 * * *` + страховочный `47 16 * * *` UTC, то есть после публикации OTE и ČNB; не ровно в начале часа, потому что GitHub в пиковое время задерживает или пропускает запуски по расписанию; + ручной запуск): `pipeline daily` → `dbt source freshness` → `dbt build` (target prod, MotherDuck) → `pipeline record-dbt-results` (результаты в `ops.dbt_results` для страницы Data Quality) → артефакты dbt. Шаги идут дальше после ошибки, чтобы всё было записано, а последний шаг роняет job, если упал любой из предыдущих.
 - **`backfill.yml`** (ручной запуск с параметрами from/to/source/resume): `pipeline backfill` → `dbt build --full-refresh`.
 - **`docs.yml`** (push в `dbt/**` + ручной запуск): `dbt docs generate --static` по продовой базе → GitHub Pages.
 - `concurrency: warehouse` не даёт daily и backfill писать в базу одновременно.

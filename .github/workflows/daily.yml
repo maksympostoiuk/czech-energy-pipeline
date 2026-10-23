@@ -2,8 +2,11 @@ name: Daily load
 
 on:
   schedule:
-    # 14:00 UTC = 15:00 CET / 16:00 CEST: after OTE (~13:00) and ČNB (14:30) publish.
-    - cron: "0 14 * * *"
+    # ~14:17 UTC = 15:17 CET / 16:17 CEST: after OTE (~13:00) and ČNB (14:30) publish.
+    # GitHub delays or drops scheduled runs at the top of the hour under load, so the
+    # minute is off-peak and a second, idempotent run catches a skipped or late first one.
+    - cron: "17 14 * * *"
+    - cron: "47 16 * * *"
   workflow_dispatch:
 
 permissions:

@@ -88,7 +88,7 @@ physically impossible global radiation of 1673.7 W/m² flagged as good quality.
 | Workflow | Trigger | What it does |
 |---|---|---|
 | `ci.yml` | push to `main`, pull requests | ruff, pytest on stored API responses, `dbt build --empty` on an empty warehouse |
-| `daily.yml` | 14:00 UTC daily, manual | `pipeline daily` → `dbt source freshness` → `dbt build` on MotherDuck → results into `ops.dbt_results` |
+| `daily.yml` | 14:17 and 16:47 UTC daily, manual | `pipeline daily` → `dbt source freshness` → `dbt build` on MotherDuck → results into `ops.dbt_results` |
 | `backfill.yml` | manual (from / to / source / resume) | `pipeline backfill` → `dbt build --full-refresh` |
 | `docs.yml` | changes in `dbt/`, manual | `dbt docs generate --static` → GitHub Pages |
 
