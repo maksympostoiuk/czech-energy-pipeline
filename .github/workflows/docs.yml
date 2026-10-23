@@ -21,6 +21,13 @@ jobs:
       DBT_TARGET: prod
       MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
     steps:
+      - name: Check that the MotherDuck token is configured
+        run: |
+          if [ -z "$MOTHERDUCK_TOKEN" ]; then
+            echo "::error::Repository secret MOTHERDUCK_TOKEN is missing (see README, Production)."
+            exit 1
+          fi
+
       - uses: actions/checkout@v7
 
       - uses: astral-sh/setup-uv@v10
