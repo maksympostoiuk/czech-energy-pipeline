@@ -67,6 +67,7 @@ cols[3].metric(
     f"{cheapest[price_col]:,.1f}",
     f"at {cheapest['local_time']}",
     delta_color="off",
+    delta_arrow="off",  # the delta slot carries a time here, not a change
     border=True,
 )
 cols[4].metric(
@@ -74,6 +75,7 @@ cols[4].metric(
     f"{dearest[price_col]:,.1f}",
     f"at {dearest['local_time']}",
     delta_color="off",
+    delta_arrow="off",
     border=True,
 )
 cols[5].metric("Hours < 0", f"{today['negative_price_hours']:g}", border=True)
