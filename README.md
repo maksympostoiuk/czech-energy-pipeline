@@ -3,133 +3,198 @@
 [![CI](https://github.com/maksympostoiuk/czech-energy-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/maksympostoiuk/czech-energy-pipeline/actions/workflows/ci.yml)
 [![Daily load](https://github.com/maksympostoiuk/czech-energy-pipeline/actions/workflows/daily.yml/badge.svg)](https://github.com/maksympostoiuk/czech-energy-pipeline/actions/workflows/daily.yml)
 
-Daily pipeline for the Czech electricity market: day-ahead prices from **OTE**, EUR/CZK rates from **ČNB** and weather observations from **ČHMÚ**, loaded with Python into DuckDB, modelled with **dbt** (staging → marts) with data quality tests, scheduled by **GitHub Actions** and visualised in **Streamlit**.
+A production-style ELT pipeline for the Czech electricity market. Every day it loads
+**day-ahead prices from OTE**, **EUR/CZK fixings from ČNB** and **weather observations from
+ČHMÚ**, models them with **dbt** on **DuckDB / MotherDuck**, checks them with **74 dbt data tests
+plus source freshness**, including a reconciliation with OTE's official reports, and publishes a **Streamlit**
+dashboard. GitHub Actions runs everything on a schedule, at zero cost.
 
-**Live dashboard:** [czech-energy-prices.streamlit.app](https://czech-energy-prices.streamlit.app/) ·
-**dbt docs:** [maksympostoiuk.github.io/czech-energy-pipeline](https://maksympostoiuk.github.io/czech-energy-pipeline/)
+**[Live dashboard](https://czech-energy-prices.streamlit.app/)** ·
+**[dbt docs and lineage](https://maksympostoiuk.github.io/czech-energy-pipeline/)** ·
+**[Design decisions](docs/decisions.md)** ·
+**[Data sources](docs/sources.md)**
 
-> Work in progress. See [docs/PLAN.md](docs/PLAN.md) for the architecture and roadmap.
+![Day-ahead prices page of the dashboard](docs/images/dashboard-day-ahead.png)
 
-## Getting started
+## At a glance
 
-Requires [uv](https://docs.astral.sh/uv/).
+- **Sources:** OTE day-ahead market (CZ bidding zone), ČNB exchange rate fixing, 8 ČHMÚ weather stations (10-minute data)
+- **History:** since 1 January 2024: ~52,000 market periods, ~7.1 million weather observations, updated daily
+- **Stack:** Python 3.12 · httpx · pydantic · DuckDB / MotherDuck · dbt-core + dbt-duckdb · GitHub Actions · Streamlit · uv · ruff · pytest
+- **Quality:** 74 dbt data tests + source freshness, 90 pytest tests, CI on every push; daily indices equal OTE's official figures to the cent
 
-```bash
-uv sync                       # create .venv with Python 3.12 and all dependencies
-cp .env.example .env          # local settings; secrets stay out of git
-uv run pre-commit install     # lint and format on every commit
-uv run pytest
-uv run pipeline config        # show which database the pipeline will use
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph sources[Public sources]
+        OTE[OTE<br/>day-ahead results]
+        CNB[ČNB<br/>FX fixing API]
+        CHMI[ČHMÚ<br/>open data files]
+    end
+
+    subgraph actions[GitHub Actions, daily 14:17 UTC]
+        EL[Python extract + load<br/>httpx, pydantic, retries]
+        DBT[dbt build<br/>21 models and seeds, 74 tests]
+        REC[record results]
+    end
+
+    subgraph md[MotherDuck]
+        RAW[(raw)]
+        STG[(staging)]
+        INT[(intermediate)]
+        MART[(marts)]
+        OPS[(ops: runs, dbt results)]
+    end
+
+    OTE & CNB & CHMI --> EL --> RAW --> DBT
+    DBT --> STG --> INT --> MART
+    EL --> OPS
+    DBT --> REC --> OPS
+    MART --> APP[Streamlit dashboard]
+    OPS --> APP
+    DBT --> DOCS[dbt docs on GitHub Pages]
 ```
 
-## Running the pipeline
+1. **Extract + load (Python).** One extractor per source validates every response with pydantic and fails loudly on a changed format. Loads are idempotent upserts on natural keys, and every task is logged in `ops.pipeline_runs`.
+2. **Transform (dbt).** `staging` derives DST-safe UTC and local times. `intermediate` converts prices to CZK and builds an hourly national weather signal. `marts` hold the facts and dimensions the dashboard reads.
+3. **Test.** Source freshness, keys, ranges, completeness, cross-source checks and a reconciliation with OTE's published daily reports. Results are stored in the warehouse and shown on the dashboard.
+4. **Serve.** A Streamlit dashboard reads MotherDuck with a read-only token, and dbt docs are published to GitHub Pages.
 
-```bash
-uv run pipeline run --date 2026-10-21              # all sources for one business date
-uv run pipeline run --date 2026-10-21 --source ote # one source
-uv run pipeline daily                              # the scheduled run
-uv run pipeline backfill --from 2024-01-01         # history up to today (~15 min)
-uv run pipeline backfill --from 2024-01-01 --resume  # continue an interrupted backfill
-```
+## Engineering highlights
 
-`daily` loads tomorrow's and today's day-ahead prices, today's ČNB fixing and re-loads the last
-7 days of ČHMÚ observations to pick up quality-control corrections. Every load is an idempotent
-upsert on the natural key, and every task is logged in `ops.pipeline_runs`. The command exits
-non-zero if any task failed. "Not published yet" (for example, tomorrow's prices before 13:00 CET)
-is logged as `no_data` and is not a failure.
+| Challenge | How it is handled |
+|---|---|
+| The market moved from **hourly to 15-minute** products on 2025-10-01 | Facts keep the traded market time unit (`mtu_minutes`); an hourly fact is derived for comparisons across the switch |
+| **Daylight saving time**: 23/25-hour days, 92/100 periods, a repeated 02:00 | Period start = local midnight converted to UTC + offset; every session runs in UTC; tests pin the period counts |
+| OTE's endpoint is **undocumented** | Strict validation (series, period count, date); a real gap (2025-07-04, hours 13–24 missing at the source) was caught and allowlisted with evidence |
+| ČHMÚ publishes **unchecked data first**, and deletes it after a few days | Prefer the quality-checked folder, fall back to the fresh one, reload the last 7 days daily; physically impossible values are excluded and reported |
+| Re-runs and backfills must **never duplicate** | Transactional delete + insert on natural keys; uniqueness is asserted by dbt tests |
+| Is the output actually **correct**? | Base / peak / off-peak prices and volumes are reconciled with OTE's official XLSX reports for 8 days, including all four DST day types |
+| CI without data or network | Tests run on stored real API responses, `dbt build --empty` runs every model and test with zero rows, and the dashboard is rendered headlessly |
 
-| Table | Natural key | Rows per day |
-|---|---|---|
-| `raw.ote_dam_results` | `delivery_date, period` | 96 (92/100 on DST days) |
-| `raw.cnb_fx_rates` | `valid_for, currency_code` | 30 on business days |
-| `raw.chmi_observations` | `station_id, element, observed_at` | 8 stations × 6 elements × 144 = 6,912 |
-| `raw.chmi_stations` | `station_id` | station list snapshot |
+The reasoning behind each choice is in **[docs/decisions.md](docs/decisions.md)**.
 
-## Transformations (dbt)
+## What the data shows
 
-```bash
-cd dbt
-uv run dbt deps               # dbt_utils
-uv run dbt build              # seeds, models and tests against data/warehouse.duckdb
-uv run dbt docs generate && uv run dbt docs serve   # lineage graph and column docs
-```
+- **Solar sets the midday price.** Across all seasons, the average daytime price falls almost linearly from ~145 EUR/MWh in dull hours to about 0 at ~820 W/m² of global radiation.
+- **Negative prices are now routine:** 315 hours in 2024, 323 in 2025 and 280 in 2026 to date. On 1 May 2026 the price hit the harmonised −500 EUR/MWh floor at midday.
+- **Prices keep rising:** the average base price was 85.1 EUR/MWh in 2024, 97.0 in 2025 and 119.2 in 2026 to date.
+- **Temperature has a U-shaped effect:** daily prices are higher on cold days and again on hot days, and lowest around 10–20 °C.
+
+## Dashboard
+
+| Page | What it shows |
+|---|---|
+| Day-ahead prices | price per 15-minute interval for any delivery day (EUR or CZK); base / peak / off-peak with the change vs the previous day; DST days labelled |
+| History | daily base and peak, weekday × hour price profile, negative-price hours per month, year-over-year monthly prices |
+| Price vs weather | price by global radiation and by wind speed (mean and inter-quartile range), daily price vs temperature, correlations by season |
+| Data quality | freshness per source, results of the latest dbt run, coverage, recent load tasks |
+
+Charts use one colour-blind-safe palette checked with a validator. Every mark has a tooltip,
+and multi-series charts carry direct labels and a table view.
+
+<details>
+<summary>More screenshots</summary>
+
+![History page](docs/images/dashboard-history.png)
+![Price vs weather page](docs/images/dashboard-weather.png)
+![Data quality page](docs/images/dashboard-quality.png)
+
+</details>
+
+## Data model
 
 | Layer | Models | Materialization |
 |---|---|---|
-| reference (seeds) | Czech public holidays, selected stations, known incomplete OTE days | table |
-| staging | `stg_ote__dam_prices`, `stg_cnb__fx_rates`, `stg_chmi__observations`, `stg_chmi__stations`, `stg_ops__pipeline_runs` | view |
+| reference (seeds) | Czech public holidays, selected stations, physical ranges, known incomplete OTE days, official OTE indices for reconciliation | table |
+| staging | `stg_ote__dam_prices`, `stg_cnb__fx_rates`, `stg_chmi__observations`, `stg_chmi__stations`, `stg_ops__pipeline_runs`, `stg_ops__dbt_results` | view |
 | intermediate | `int_fx_eur_czk_daily`, `int_dam_prices_czk`, `int_weather_hourly_station`, `int_weather_hourly_cz` | view |
 | marts | `dim_date`, `dim_station`, `fct_dam_prices` (incremental), `fct_dam_prices_hourly`, `fct_daily_market_summary`, `mart_price_vs_weather` | table |
 
-`fct_daily_market_summary` reproduces OTE's official BASE / PEAK / OFFPEAK indices and daily
-volumes to the cent, for both the hourly (before 2025-10-01) and the 15-minute market.
+Column-level documentation and the lineage graph are in the
+[dbt docs](https://maksympostoiuk.github.io/czech-energy-pipeline/).
 
 ## Data quality
-
-`dbt build` runs 93 checks (`dbt build --exclude tag:freshness` skips the wall-clock ones).
 
 | Check | Examples |
 |---|---|
 | Source freshness | every source loaded within 26 h (warn) / 50 h (error) |
-| Keys and relationships | composite natural keys unique, stations and dates exist in dimensions |
-| Ranges | prices within SDAC limits (vars), EUR/CZK 20–30, physical weather ranges from a seed |
-| Completeness | all 92/96/100 periods per day, no missing delivery days, every UTC hour fully covered |
+| Keys and relationships | composite natural keys unique; stations and dates exist in dimensions |
+| Ranges | prices within SDAC limits (dbt vars), EUR/CZK 20–30, physical weather ranges from a seed |
+| Completeness | all 92 / 96 / 100 periods per day, no missing delivery days, every UTC hour fully covered |
 | Cross-source | weekdays without a ČNB fixing are exactly the Czech public holidays |
-| Reconciliation | daily BASE/PEAK/OFFPEAK prices and volumes equal OTE's official reports on 8 sample days (hourly and 15-minute market, all DST day types) |
+| Reconciliation | daily prices and volumes equal OTE's official reports on 8 sample days |
 | Operations | load tasks whose last attempt failed (warn) |
 
-Every test was verified by sabotaging a copy of the warehouse (duplicates, out-of-range
-values, missing periods and days, a missing ČNB fixing, a silently changed price): each
-failure is caught, and failing staging tests stop the marts from being rebuilt.
+Every check was verified by sabotaging a copy of the warehouse with duplicates, out-of-range
+values, missing periods and days, a missing ČNB fixing and a silently changed price. Each
+failure was caught, and a failing staging test stops the marts from being rebuilt.
 
-Real issues the tests surfaced: OTE published only hours 1–12 for 2025-07-04; OTE's own
-reports sum peak volume by hour position on hourly-market DST days; ČHMÚ delivered a
-physically impossible global radiation of 1673.7 W/m² flagged as good quality.
+The checks also surfaced three real issues in the sources:
 
-## Production: MotherDuck + GitHub Actions
+- OTE published only hours 1–12 for 2025-07-04.
+- On hourly-market DST days, OTE's own reports sum peak volume by hour position, while peak price uses clock time.
+- ČHMÚ delivered a physically impossible global radiation of 1673.7 W/m² flagged as good quality.
+
+## Run it locally
+
+Requires [uv](https://docs.astral.sh/uv/).
+
+```bash
+uv sync                                       # Python 3.12 and all dependencies
+cp .env.example .env                          # local settings; secrets stay out of git
+uv run pytest                                 # 90 tests, no network needed
+uv run pipeline backfill --from 2024-01-01    # history into data/warehouse.duckdb (~15 min)
+cd dbt && uv run dbt deps && uv run dbt build && cd ..
+uv run streamlit run dashboard/app.py
+```
+
+| Command | What it does |
+|---|---|
+| `pipeline run --date 2026-10-21 [--source ote]` | load one business date |
+| `pipeline daily` | the scheduled run: tomorrow's and today's prices, today's fixing, the last 7 days of weather |
+| `pipeline backfill --from … [--to …] [--resume]` | load a period; `--resume` skips periods that already loaded |
+| `pipeline init` | create the raw and ops schemas |
+| `pipeline record-dbt-results <artifacts>` | store dbt results in `ops.dbt_results` |
+
+## Production setup
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `ci.yml` | push to `main`, pull requests | ruff, pytest on stored API responses, `dbt build --empty` on an empty warehouse |
-| `daily.yml` | 14:17 and 16:47 UTC daily, manual | `pipeline daily` → `dbt source freshness` → `dbt build` on MotherDuck → results into `ops.dbt_results` |
-| `backfill.yml` | manual (from / to / source / resume) | `pipeline backfill` → `dbt build --full-refresh` |
+| `ci.yml` | push to `main`, pull requests | ruff, pytest, `dbt build --empty`, dashboard render test |
+| `daily.yml` | 14:17 and 16:47 UTC, manual | `pipeline daily` → `dbt source freshness` → `dbt build` → results into `ops.dbt_results` |
+| `backfill.yml` | manual | `pipeline backfill` → `dbt build --full-refresh` |
 | `docs.yml` | changes in `dbt/`, manual | `dbt docs generate --static` → GitHub Pages |
 
 One-time setup:
 
-1. Create a MotherDuck account and an access token.
-2. In the repository, open Settings → Secrets and variables → Actions, and add the secret `MOTHERDUCK_TOKEN`.
-3. In Settings → Pages, set Source to **GitHub Actions**.
-4. Run **Backfill** once (Actions → Backfill → Run workflow, from `2024-01-01`), then **dbt docs**.
+1. Create a MotherDuck account (free Lite plan) and a read/write token. Add it as the repository secret `MOTHERDUCK_TOKEN`.
+2. In Settings → Pages, set Source to **GitHub Actions**.
+3. Run **Backfill** once, then **dbt docs**.
+4. Deploy the dashboard on Streamlit Community Cloud. Use main file `dashboard/app.py`, Python 3.12, and a read-only MotherDuck token in Secrets as `MOTHERDUCK_TOKEN = "…"`.
 
-The `md:czech_energy` database is created on the first run. MotherDuck currently supports
-DuckDB up to 1.5.x, so `duckdb` is pinned to `>=1.5.6,<1.6`. To run against MotherDuck
-locally, set `PIPELINE_ENV=prod` and `MOTHERDUCK_TOKEN` in `.env`, and use
-`DBT_TARGET=prod` for dbt.
+MotherDuck supports DuckDB up to 1.5.x, so `duckdb` is pinned to `<1.6`. GitHub disables
+scheduled workflows after 60 days without repository activity; if that happens, re-enable
+**Daily load** in the Actions tab.
 
-GitHub disables scheduled workflows after 60 days without repository activity; re-enable
-**Daily load** in the Actions tab if that happens.
+## Repository layout
 
-## Dashboard (Streamlit)
-
-```bash
-uv run streamlit run dashboard/app.py      # reads data/warehouse.duckdb, read-only
+```
+src/energy_pipeline/   extract (ote, cnb, chmi), load (warehouse, dbt results), pipeline, CLI
+dbt/                   models (staging, intermediate, marts), seeds, singular tests
+dashboard/             Streamlit app: data access, charts, four pages
+tests/                 pytest suite and stored real API responses (fixtures/)
+scripts/               fetch_fixtures.py: refresh the stored API responses
+docs/                  sources.md, decisions.md, PLAN.md (project plan, in Russian), images/
+.github/workflows/     ci, daily, backfill, docs
 ```
 
-| Page | What it shows |
-|---|---|
-| Day-ahead prices | price per 15-minute interval for any delivery day (EUR or CZK), base / peak / off-peak with the change vs the previous day, DST days handled |
-| History | daily base and peak, weekday × hour price profile, negative-price hours per month, year-over-year monthly prices |
-| Price vs weather | price by global radiation and by wind speed (mean and inter-quartile range), daily price vs temperature, correlations by season |
-| Data quality | freshness of each source, results of the latest dbt run, coverage, recent load tasks |
+## Data sources
 
-Charts use one validated colour palette (colour-blind safe), carry a tooltip on every mark,
-and each multi-series chart has direct labels and a table view. Every page is rendered
-headlessly in CI (`tests/test_dashboard.py`, Streamlit AppTest) against the empty warehouse.
+- **OTE, a.s.:** day-ahead market results for the Czech bidding zone ([ote-cr.cz](https://www.ote-cr.cz/))
+- **Česká národní banka:** exchange rate fixing ([api.cnb.cz](https://api.cnb.cz/))
+- **ČHMÚ:** climatological open data ([opendata.chmi.cz](https://opendata.chmi.cz/))
 
-Deploying on Streamlit Community Cloud: New app → this repository, branch `main`, main file
-`dashboard/app.py`, Python 3.12, and in Secrets:
-
-```toml
-MOTHERDUCK_TOKEN = "<a read-only MotherDuck token>"
-```
+This is an independent portfolio project, not affiliated with any of these institutions. See
+[docs/sources.md](docs/sources.md) for endpoints, formats and known quirks.
