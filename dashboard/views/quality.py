@@ -69,7 +69,34 @@ else:
         )
 
 st.subheader("Coverage")
-st.dataframe(data.coverage(), hide_index=True, width="stretch")
+st.dataframe(
+    data.coverage(),
+    hide_index=True,
+    width="stretch",
+    column_config={
+        "dataset": "Dataset",
+        "first_day": st.column_config.DateColumn("First day", format="DD.MM.YYYY"),
+        "last_day": st.column_config.DateColumn("Last day", format="DD.MM.YYYY"),
+        "rows": st.column_config.NumberColumn("Rows", format="localized"),
+    },
+)
 
 st.subheader("Recent load tasks")
-st.dataframe(data.recent_tasks(), hide_index=True, width="stretch")
+tasks = data.recent_tasks()
+tasks["source"] = tasks["source"].map(SOURCE_NAMES).fillna(tasks["source"])
+tasks["error"] = tasks["error"].fillna("")
+st.dataframe(
+    tasks,
+    hide_index=True,
+    width="stretch",
+    column_config={
+        "finished_at": st.column_config.DatetimeColumn("Finished (UTC)", format="DD.MM.YYYY HH:mm"),
+        "source": "Source",
+        "business_date": st.column_config.DateColumn("From", format="DD.MM.YYYY"),
+        "period_end": st.column_config.DateColumn("To", format="DD.MM.YYYY"),
+        "status": "Status",
+        "rows_loaded": st.column_config.NumberColumn("Rows", format="localized"),
+        "duration_s": st.column_config.NumberColumn("Seconds", format="%.1f"),
+        "error": "Error",
+    },
+)
