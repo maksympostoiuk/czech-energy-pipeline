@@ -5,6 +5,9 @@
 
 Daily pipeline for the Czech electricity market: day-ahead prices from **OTE**, EUR/CZK rates from **ČNB** and weather observations from **ČHMÚ**, loaded with Python into DuckDB, modelled with **dbt** (staging → marts) with data quality tests, scheduled by **GitHub Actions** and visualised in **Streamlit**.
 
+**Live dashboard:** [czech-energy-prices.streamlit.app](https://czech-energy-prices.streamlit.app/) ·
+**dbt docs:** [maksympostoiuk.github.io/czech-energy-pipeline](https://maksympostoiuk.github.io/czech-energy-pipeline/)
+
 > Work in progress. See [docs/PLAN.md](docs/PLAN.md) for the architecture and roadmap.
 
 ## Getting started
