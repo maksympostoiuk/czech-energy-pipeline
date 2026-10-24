@@ -106,3 +106,27 @@ locally, set `PIPELINE_ENV=prod` and `MOTHERDUCK_TOKEN` in `.env`, and use
 
 GitHub disables scheduled workflows after 60 days without repository activity; re-enable
 **Daily load** in the Actions tab if that happens.
+
+## Dashboard (Streamlit)
+
+```bash
+uv run streamlit run dashboard/app.py      # reads data/warehouse.duckdb, read-only
+```
+
+| Page | What it shows |
+|---|---|
+| Day-ahead prices | price per 15-minute interval for any delivery day (EUR or CZK), base / peak / off-peak with the change vs the previous day, DST days handled |
+| History | daily base and peak, weekday × hour price profile, negative-price hours per month, year-over-year monthly prices |
+| Price vs weather | price by global radiation and by wind speed (mean and inter-quartile range), daily price vs temperature, correlations by season |
+| Data quality | freshness of each source, results of the latest dbt run, coverage, recent load tasks |
+
+Charts use one validated colour palette (colour-blind safe), carry a tooltip on every mark,
+and each multi-series chart has direct labels and a table view. Every page is rendered
+headlessly in CI (`tests/test_dashboard.py`, Streamlit AppTest) against the empty warehouse.
+
+Deploying on Streamlit Community Cloud: New app → this repository, branch `main`, main file
+`dashboard/app.py`, Python 3.12, and in Secrets:
+
+```toml
+MOTHERDUCK_TOKEN = "<a read-only MotherDuck token>"
+```

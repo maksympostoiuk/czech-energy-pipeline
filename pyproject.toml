@@ -18,6 +18,9 @@ dependencies = [
 pipeline = "energy_pipeline.cli:main"
 
 [dependency-groups]
+dashboard = [
+    "streamlit>=1.66.1",
+]
 dbt = [
     "dbt-core>=1.12.6",
     "dbt-duckdb>=1.11.0",
@@ -42,7 +45,7 @@ packages = ["src/energy_pipeline"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["src", "tests"]
+src = ["src", "tests", "dashboard"]
 
 [tool.ruff.lint]
 select = [
@@ -56,6 +59,10 @@ select = [
     "PTH",     # pathlib
     "RUF",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# User-facing text uses real typography (en dash for ranges, minus sign).
+"dashboard/**" = ["RUF001"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

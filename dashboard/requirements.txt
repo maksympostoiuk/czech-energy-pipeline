@@ -1,0 +1,6 @@
+# Streamlit Community Cloud installs these (entrypoint: dashboard/app.py).
+# duckdb stays on 1.5.x: MotherDuck does not support DuckDB 2.0 yet.
+streamlit>=1.66,<2
+duckdb>=1.5.6,<1.6
+pandas>=2.2
+pytz>=2024.1

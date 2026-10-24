@@ -46,3 +46,8 @@ jobs:
           cd dbt
           uv run dbt deps
           uv run dbt build --empty --exclude tag:freshness tag:needs_history
+
+      - name: Dashboard renders every page (on the empty warehouse)
+        env:
+          DASHBOARD_DUCKDB_PATH: ${{ runner.temp }}/ci.duckdb
+        run: uv run pytest tests/test_dashboard.py
