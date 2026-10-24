@@ -27,33 +27,24 @@ dashboard. GitHub Actions runs everything on a schedule, at zero cost.
 
 ```mermaid
 flowchart LR
-    subgraph sources[Public sources]
-        OTE[OTE<br/>day-ahead results]
-        CNB[ČNB<br/>FX fixing API]
-        CHMI[ČHMÚ<br/>open data files]
+    SRC["OTE · ČNB · ČHMÚ<br/>public APIs and files"]
+
+    subgraph GHA["GitHub Actions · daily"]
+        EL["Python extract + load<br/>pydantic validation, retries"]
+        DBT["dbt build<br/>staging → intermediate → marts<br/>74 data tests"]
     end
 
-    subgraph actions[GitHub Actions, daily 14:17 UTC]
-        EL[Python extract + load<br/>httpx, pydantic, retries]
-        DBT[dbt build<br/>21 models and seeds, 74 tests]
-        REC[record results]
+    subgraph MD["MotherDuck"]
+        RAW[("raw")]
+        MARTS[("marts")]
+        OPS[("ops<br/>run log, test results")]
     end
 
-    subgraph md[MotherDuck]
-        RAW[(raw)]
-        STG[(staging)]
-        INT[(intermediate)]
-        MART[(marts)]
-        OPS[(ops: runs, dbt results)]
-    end
-
-    OTE & CNB & CHMI --> EL --> RAW --> DBT
-    DBT --> STG --> INT --> MART
-    EL --> OPS
-    DBT --> REC --> OPS
-    MART --> APP[Streamlit dashboard]
+    SRC --> EL --> RAW --> DBT --> MARTS --> APP["Streamlit dashboard"]
+    EL -.-> OPS
+    DBT -.-> OPS
     OPS --> APP
-    DBT --> DOCS[dbt docs on GitHub Pages]
+    DBT --> DOCS["dbt docs<br/>GitHub Pages"]
 ```
 
 1. **Extract + load (Python).** One extractor per source validates every response with pydantic and fails loudly on a changed format. Loads are idempotent upserts on natural keys, and every task is logged in `ops.pipeline_runs`.
