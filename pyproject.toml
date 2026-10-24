@@ -33,7 +33,7 @@ dev = [
 ]
 
 [tool.uv]
-default-groups = ["dev", "dbt"]
+default-groups = ["dev", "dbt", "dashboard"]
 
 [build-system]
 requires = ["hatchling"]
