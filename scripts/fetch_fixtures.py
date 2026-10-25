@@ -7,6 +7,7 @@ Each case is picked to cover one edge case documented in docs/sources.md.
 
 import json
 import sys
+import urllib.error
 import urllib.request
 from collections.abc import Callable
 from pathlib import Path
@@ -43,6 +44,51 @@ CASES: dict[str, str] = {
     ),
     "chmi/meta1-stations.json": f"{CHMI}/now/metadata/meta1-{CHMI_META_DAY}.json",
     "chmi/meta4-quality-codes.json": f"{CHMI}/now/metadata/meta4-{CHMI_META_DAY}.json",
+}
+
+# Open-Meteo: ICON-EU forecasts. Previous Runs serves the value predicted N days before each
+# valid hour; Single Runs serves one whole model run, to prove which run that value came from.
+OPEN_METEO_VARS = "temperature_2m,shortwave_radiation,wind_speed_10m,wind_speed_100m,cloud_cover"
+PREVIOUS_VARS = ",".join(f"{v}_previous_day{n}" for v in OPEN_METEO_VARS.split(",") for n in (1, 2))
+PRAHA = "latitude=50.008&longitude=14.447"
+PRAHA_MUNCHEN = "latitude=50.008,48.14&longitude=14.447,11.58"
+OM_COMMON = "models=dwd_icon_eu&timezone=UTC&wind_speed_unit=ms"
+OM_PREVIOUS = "https://previous-runs-api.open-meteo.com/v1/forecast?" + OM_COMMON
+OM_SINGLE = "https://single-runs-api.open-meteo.com/v1/forecast?" + OM_COMMON
+
+
+def _previous(coords: str, start: str, end: str) -> str:
+    return f"{OM_PREVIOUS}&{coords}&start_date={start}&end_date={end}&hourly={PREVIOUS_VARS}"
+
+
+def _single(run: str) -> str:
+    """run: initialisation hour in UTC, e.g. 2026-06-13T06."""
+    return f"{OM_SINGLE}&{PRAHA}&run={run}:00&forecast_hours=60&hourly={OPEN_METEO_VARS}"
+
+
+CASES |= {
+    # Two locations in one request: the response is a list (one location: a plain object).
+    "openmeteo/previous_icon_eu_2026-10-24_2loc.json": _previous(
+        PRAHA_MUNCHEN, "2026-10-24", "2026-10-25"
+    ),
+    # A hole in the archive: previous_day2 radiation/wind 100 m/cloud cover are null.
+    "openmeteo/previous_icon_eu_2026-04-09_gap.json": _previous(PRAHA, "2026-04-09", "2026-04-09"),
+    # The run rule: previous_dayN at T comes from the run initialised at floor6(T - N days)...
+    "openmeteo/previous_icon_eu_2026-06-15.json": _previous(PRAHA, "2026-06-15", "2026-06-15"),
+    # ...or from an older one when that run is missing (2026-10-18 06Z is).
+    "openmeteo/previous_icon_eu_2026-10-20.json": _previous(PRAHA, "2026-10-20", "2026-10-20"),
+    "openmeteo/meta_dwd_icon_eu.json": "https://api.open-meteo.com/data/dwd_icon_eu/static/meta.json",
+}
+OPEN_METEO_RUNS = [
+    "2026-06-13T00", "2026-06-13T06", "2026-06-13T12", "2026-06-13T18",
+    "2026-06-14T00", "2026-06-14T06", "2026-06-14T12", "2026-06-14T18",
+    "2026-10-18T00", "2026-10-18T06",
+]  # fmt: skip
+CASES |= {f"openmeteo/single_icon_eu_{run}Z.json": _single(run) for run in OPEN_METEO_RUNS}
+# Answered with HTTP 400 and a JSON reason; the body is stored as is.
+ERROR_CASES: dict[str, str] = {
+    "openmeteo/error_invalid_model.json": OM_PREVIOUS.replace("dwd_icon_eu", "no_such_model")
+    + f"&{PRAHA}&start_date=2026-06-15&end_date=2026-06-15&hourly=temperature_2m_previous_day1",
 }
 
 # Historical CSV files are ~200 kB each; the first lines are enough to pin the format.
@@ -85,6 +131,14 @@ def fetch(url: str) -> bytes:
         return response.read()
 
 
+def fetch_error(url: str) -> bytes:
+    try:
+        fetch(url)
+    except urllib.error.HTTPError as error:
+        return error.read()
+    raise RuntimeError(f"expected an HTTP error from {url}")
+
+
 def selected(names: dict, fragments: list[str]) -> list[str]:
     return [name for name in names if not fragments or any(f in name for f in fragments)]
 
@@ -98,6 +152,15 @@ def main(fragments: list[str]) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(raw)
         print(f"{name}  <-  {url}")
+
+    for name in selected(ERROR_CASES, fragments):
+        url = ERROR_CASES[name]
+        raw = fetch_error(url)
+        json.loads(raw)
+        target = FIXTURES / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(raw)
+        print(f"{name}  <-  {url} (error)")
 
     for name in selected(SUBSET_CASES, fragments):
         url, subset = SUBSET_CASES[name]

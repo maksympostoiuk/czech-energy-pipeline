@@ -1,6 +1,7 @@
 # Data sources
 
-Findings from probing the three public sources on 2026-10-22. Every claim here is backed by a
+Findings from probing the public sources: OTE, ČNB and ČHMÚ on 2026-10-22, Open-Meteo on
+2026-10-25. Every claim here is backed by a
 stored real response in [`tests/fixtures/`](../tests/fixtures) and pinned by
 [`tests/test_fixtures.py`](../tests/test_fixtures.py). To refresh the fixtures, run
 `uv run python scripts/fetch_fixtures.py`.
@@ -10,6 +11,7 @@ stored real response in [`tests/fixtures/`](../tests/fixtures) and pinned by
 | OTE | Day-ahead market price and volume, CZ bidding zone | 15 min (60 min before 2025-10-01) | D-1 around 13:00 CET | none |
 | ČNB | Official CZK exchange rate fixing | business day | business days after 14:30 CET | none |
 | ČHMÚ | Weather station observations | 10 min | hourly, finalised 00:02 UTC next day | none |
+| Open-Meteo | Weather forecasts (DWD ICON-EU) as issued before the auction | 1 h | runs every 3 h, ~3 h after initialisation | none (free non-commercial tier) |
 
 ---
 
@@ -225,3 +227,150 @@ archived yet), then the monthly JSON in `recent/{MM}/`, then the daily files.
 The archives are not always complete. For example, the CSV for 2025-12-31 has 6,864 of 6,912
 rows, because a few 10-minute values are absent rather than marked missing. dbt tests should
 therefore check completeness against a threshold, not demand exactly 144 values per day.
+
+---
+
+## 5. Open-Meteo: weather forecasts
+
+The price forecast for delivery day D+1 is made before the auction closes at 12:00 Prague time
+on day D. ČHMÚ only has observations, and the observed weather of D+1 is not known at that
+time. The model needs the forecast as it was **issued before 12:00 on D**, for every day of the
+history. Open-Meteo archives past forecasts, needs no key and is free for non-commercial use.
+
+**APIs**
+
+| API | What it returns | Fit for D+1 at 12:00 D |
+|---|---|---|
+| Forecast `api.open-meteo.com/v1/forecast` | the latest runs | live only, no history |
+| Historical Forecast `historical-forecast-api.open-meteo.com` | the first hours of each run, stitched | no: equals `previous_day0` (lead 0–5 h), checked 48/48 hours |
+| **Previous Runs** `previous-runs-api.open-meteo.com` | `<variable>_previous_dayN`: the value predicted N days before the valid hour, N = 0…7 | **yes, used** |
+| Single Runs `single-runs-api.open-meteo.com` | one whole run, chosen by `run=YYYY-MM-DDTHH:MM` (UTC initialisation) | ECMWF IFS HRES from 2024-03-14, other models only from 2026-04-02; used to verify the rule below |
+
+```
+GET https://previous-runs-api.open-meteo.com/v1/forecast
+    ?latitude=50.008,48.14&longitude=14.447,11.58      # several points in one request
+    &models=dwd_icon_eu&timezone=UTC&wind_speed_unit=ms
+    &start_date=2026-10-24&end_date=2026-10-25
+    &hourly=temperature_2m_previous_day1,temperature_2m_previous_day2,...
+```
+
+- One coordinate returns an object, several return a **list in request order**. Coordinates in
+  the answer are those of the model grid cell (Praha-Libuš 50.008, 14.447 → 50.0, 14.4375).
+- With `timezone=UTC`, `time` holds naive ISO hours (`2026-10-24T00:00`), so DST days are
+  ordinary 24-hour UTC ranges.
+- Wind defaults to km/h; `wind_speed_unit=ms` gives m/s like ČHMÚ.
+- **`shortwave_radiation` at hour T is the mean over the preceding hour**, while ČHMÚ hours are
+  labelled by their start. Matching T to ČHMÚ hour T−1 h halves the error (MAE 21.7 vs
+  40.0 W/m² with the labels taken as equal, ICON-EU, national mean).
+- Errors are HTTP 400 with `{"error": true, "reason": "..."}`.
+
+**Which run a value comes from (the leak-safety fact).** For DWD ICON-EU,
+`previous_dayN` at valid hour T equals the main run (00/06/12/18Z) initialised at
+**floor_6h(T − N days)**: lead 24–29 h for day 1, 48–53 h for day 2. ICON-EU also runs at
+03/09/15/21Z, but those runs are never used. Checked value by value against Single Runs on
+2026-04-10, 2026-06-15, 2026-07-20, 2026-09-03 (München), 2026-10-20 and 2026-10-25. Two
+exceptions, both safe:
+
+- the expected run is missing from the archive: an **older** run fills in (2026-10-20
+  06–11Z, day 2, from 2026-10-18 00Z instead of 06Z, which is missing);
+- the expected run does not exist yet (a future hour): the **latest available** run fills in,
+  which again is older.
+
+So the run behind `previous_dayN` at T is never initialised later than floor_6h(T − N days).
+That bound depends on T and N only, and the loader stores it as `issued_at`.
+`tests/test_fixtures.py` pins the rule and the fallback against stored Single Runs.
+
+ECMWF IFS 0.25° does **not** follow such a rule. On 2026-06-15, `previous_day1` at 05:00
+equals the 2026-06-14 06Z run (lead 23 h), and `previous_day2` at 22:00 equals the same run
+(lead 40 h). Its issue time cannot be bounded, so it is not used. ECMWF IFS HRES (9 km) is only
+partly archived in Previous Runs: about 9,000 of the 24,576 hours of 2024-01-01…2026-10-20 at
+Praha-Libuš.
+
+**Known at 12:00 Prague on D.** 12:00 Prague is 10:00 UTC in summer and 11:00 UTC in winter.
+`https://api.open-meteo.com/data/dwd_icon_eu/static/meta.json` reports the last run's
+initialisation and availability times (Unix seconds): on 2026-10-25 ICON-EU 09Z was served at
+12:03Z, 3.1 h later. ECMWF IFS HRES took 6.2 h. To keep a wide margin, the features use only
+runs initialised **no later than 00Z of D** (available by ~03Z, 7–8 h before the cutoff). For
+each hour T of D+1:
+
+| Hours of D+1 (UTC) | Local hours | Series | Run | Lead |
+|---|---|---|---|---|
+| T < 06:00 UTC on D+1 | 00–06 (CET), 00–07 (CEST) | `previous_day1` | D−1 18Z or D 00Z | 24–29 h |
+| T ≥ 06:00 UTC on D+1 | the rest | `previous_day2` | D−1 06Z, 12Z or 18Z | 48–53 h |
+
+A run late in the day can therefore never leak into the features, however late the job runs.
+
+**History and holes** (ICON-EU, 8 ČHMÚ stations)
+
+- Day 1 from 2024-01-19 12Z and day 2 from 2024-01-20 12Z; `wind_speed_100m` only from
+  2024-02-16 (day 1) / 2024-02-17 (day 2).
+- From 2024-02-18 to 2026-10-20 every value is present except one hole: `previous_day2` of
+  `shortwave_radiation`, `wind_speed_100m` and `cloud_cover` is null for 2026-04-07…11 (760
+  station-hours). The model must accept missing weather features; falling back to day 1 there
+  would break the rule.
+- Variables kept: `temperature_2m` (°C), `shortwave_radiation` (GHI, W/m²), `wind_speed_10m`
+  and `wind_speed_100m` (m/s; 100 m is close to turbine hub height), `cloud_cover` (%).
+
+**Skill against ČHMÚ** (`uv run python scripts/compare_forecast_models.py`; national mean
+of the 8 stations, the signal the model uses; 2024-03-14…2026-10-20; MAE, lower is better):
+
+| Series | Radiation, W/m² (bias) | Temperature, °C | Wind 10 m, m/s (corr) |
+|---|---|---|---|
+| **ICON-EU, rule above** | **21.7** (−2.5) | **0.78** | 0.64 (**0.92**) |
+| ECMWF IFS 0.25°, same rule | 23.7 (+12.2) | 0.83 | 0.46 (0.88) |
+| GFS, same rule | 26.3 (+6.1) | 1.12 | 0.50 (0.89) |
+| ICON-EU, `previous_day1` everywhere (leaks for most hours) | 18.8 | 0.68 | 0.61 |
+| ICON-EU, `previous_day2` everywhere | 21.7 | 0.81 | 0.65 |
+| *Sample of 40 days:* ECMWF IFS HRES, 00Z run of D at every hour (Single Runs) | 22.1 | 0.77 | 0.44 |
+| *Same 40 days:* ICON-EU, rule above | 21.1 | 0.73 | 0.65 |
+
+- **ICON-EU is used**: the best radiation and temperature, and the highest wind correlation.
+  Its 10 m wind reads about 0.57 m/s low, a constant bias the price model absorbs; ECMWF's
+  lower wind MAE comes mostly from having no such bias.
+- **The rule costs little.** Taking `previous_day1` everywhere would cut the radiation error
+  from 21.7 to 18.8 W/m², but for most hours that run is published after 12:00 on D.
+- **A fresher run would not help much.** ECMWF HRES's 00Z run of D, the freshest run any
+  model offers at noon, is no more accurate than ICON-EU under the rule on the sampled days, so
+  Single Runs (one request per day) is not worth it.
+
+**Points.** The 8 ČHMÚ stations (same coordinates as `dim_station`), so forecasts and
+observations describe the same places. CZ prices are coupled with Germany through SDAC, and
+German solar and wind move them, so six German points are added, one request either way:
+
+| Point | Lat | Lon | Why |
+|---|---|---|---|
+| München | 48.14 | 11.58 | Bavarian solar |
+| Nürnberg | 49.45 | 11.08 | Bavarian solar |
+| Stuttgart | 48.78 | 9.18 | Baden-Württemberg solar |
+| Husum | 54.48 | 9.05 | Schleswig-Holstein wind |
+| Emden | 53.37 | 7.21 | Lower Saxony wind |
+| Magdeburg | 52.13 | 11.63 | Saxony-Anhalt wind |
+
+Whether they help is measured in the model evaluation, not assumed.
+
+**Limits and licence.** The free tier allows fewer than 10,000 calls a day, 5,000 an hour and
+600 a minute, for non-commercial use (no subscriptions, no ads). A request counts as several
+calls when it has more than 10 variables or spans more than two weeks. How several locations
+in one request are counted is not documented; even if each counts as a call, the 14-point
+backfill of 2024-01-19…today with 10 variables weighs about 14 × 72 ≈ 1,000 calls, and the
+daily load about 14. Data is CC BY 4.0; credit it as
+"Weather data by [Open-Meteo.com](https://open-meteo.com/)" wherever the data is shown
+(README and dashboard, once the forecasts are loaded).
+
+---
+
+## 6. ENTSO-E Transparency Platform (planned)
+
+A free API token is needed and has been requested. From Commission Regulation (EU) 543/2013
+(original text):
+
+- Art. 6(2)(b): the day-ahead **total load forecast** is published "no later than two hours
+  before the gate closure of the day-ahead market", so by 10:00 on D for D+1, and updated when
+  significant changes occur.
+- Art. 14(2)(c, d): the day-ahead **generation forecast** and the **wind and solar forecast** are
+  due no later than 18:00 Brussels time one day before delivery, which for D+1 is after the
+  12:00 cutoff on D, and they are updated during intraday trading.
+
+Both can be revised after 12:00 on D, so only a version provably published before the cutoff
+may be used. Whether the API exposes publication times or revisions is to be checked once the
+token arrives.

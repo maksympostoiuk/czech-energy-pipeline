@@ -21,7 +21,7 @@ dashboard. GitHub Actions runs everything on a schedule, at zero cost.
 - **Sources:** OTE day-ahead market (CZ bidding zone), ČNB exchange rate fixing, 8 ČHMÚ weather stations (10-minute data)
 - **History:** since 1 January 2024: ~52,000 market periods, ~7.1 million weather observations, updated daily
 - **Stack:** Python 3.12 · httpx · pydantic · DuckDB / MotherDuck · dbt-core + dbt-duckdb · GitHub Actions · Streamlit · uv · ruff · pytest
-- **Quality:** 74 dbt data tests + source freshness, 90 pytest tests, CI on every push; daily indices equal OTE's official figures to the cent
+- **Quality:** 74 dbt data tests + source freshness, 95 pytest tests, CI on every push; daily indices equal OTE's official figures to the cent
 
 ## Architecture
 
@@ -135,7 +135,7 @@ Requires [uv](https://docs.astral.sh/uv/).
 ```bash
 uv sync                                       # Python 3.12 and all dependencies
 cp .env.example .env                          # local settings; secrets stay out of git
-uv run pytest                                 # 90 tests, no network needed
+uv run pytest                                 # 95 tests, no network needed
 uv run pipeline backfill --from 2024-01-01    # history into data/warehouse.duckdb (~15 min)
 cd dbt && uv run dbt deps && uv run dbt build && cd ..
 uv run streamlit run dashboard/app.py
@@ -176,8 +176,8 @@ src/energy_pipeline/   extract (ote, cnb, chmi), load (warehouse, dbt results), 
 dbt/                   models (staging, intermediate, marts), seeds, singular tests
 dashboard/             Streamlit app: data access, charts, four pages
 tests/                 pytest suite and stored real API responses (fixtures/)
-scripts/               fetch_fixtures.py: refresh the stored API responses
-docs/                  sources.md, decisions.md, PLAN.md (project plan, in Russian), images/
+scripts/               fetch_fixtures.py (refresh stored API responses), compare_forecast_models.py (forecast skill vs ČHMÚ)
+docs/                  sources.md, decisions.md, PLAN.md and FORECAST_PLAN.md (plans, in Russian), images/
 .github/workflows/     ci, daily, backfill, docs
 ```
 
