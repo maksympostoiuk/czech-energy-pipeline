@@ -80,6 +80,22 @@ CHMI_STATIONS = RawTable(
         begin_date DATE
     """,
 )
+OPENMETEO_FORECASTS = RawTable(
+    name="raw.openmeteo_forecasts",
+    key=("point_id", "model", "valid_at", "lead_days"),
+    columns="""
+        point_id VARCHAR NOT NULL,
+        model VARCHAR NOT NULL,
+        valid_at TIMESTAMPTZ NOT NULL,
+        lead_days TINYINT NOT NULL,
+        issued_at TIMESTAMPTZ NOT NULL,
+        temperature_2m_c DOUBLE,
+        shortwave_radiation_wm2 DOUBLE,
+        wind_speed_10m_ms DOUBLE,
+        wind_speed_100m_ms DOUBLE,
+        cloud_cover_pct DOUBLE
+    """,
+)
 DBT_RESULTS = RawTable(
     name="ops.dbt_results",
     key=("invocation_id", "unique_id"),
@@ -95,7 +111,14 @@ DBT_RESULTS = RawTable(
         message VARCHAR
     """,
 )
-RAW_TABLES = (OTE_DAM_RESULTS, CNB_FX_RATES, CHMI_OBSERVATIONS, CHMI_STATIONS, DBT_RESULTS)
+RAW_TABLES = (
+    OTE_DAM_RESULTS,
+    CNB_FX_RATES,
+    CHMI_OBSERVATIONS,
+    CHMI_STATIONS,
+    OPENMETEO_FORECASTS,
+    DBT_RESULTS,
+)
 
 PIPELINE_RUNS_DDL = """
 CREATE TABLE IF NOT EXISTS ops.pipeline_runs (

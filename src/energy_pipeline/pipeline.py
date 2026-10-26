@@ -14,20 +14,24 @@ from uuid import uuid4
 
 import httpx
 
-from energy_pipeline.extract import chmi, cnb, ote, to_rows
+from energy_pipeline.extract import chmi, cnb, openmeteo, ote, to_rows
 from energy_pipeline.load.warehouse import (
     CHMI_OBSERVATIONS,
     CHMI_STATIONS,
     CNB_FX_RATES,
+    OPENMETEO_FORECASTS,
     OTE_DAM_RESULTS,
     Warehouse,
 )
 
 log = logging.getLogger(__name__)
 
-Source = Literal["ote", "cnb", "chmi"]
-SOURCES: tuple[Source, ...] = ("ote", "cnb", "chmi")
+Source = Literal["ote", "cnb", "chmi", "openmeteo"]
+SOURCES: tuple[Source, ...] = ("ote", "cnb", "chmi", "openmeteo")
 CHMI_RELOAD_DAYS = 7  # quality-control corrections arrive in recent/ for about a week
+# Open-Meteo: tomorrow's hours, plus the last two days again. A value whose run was not out
+# yet at load time is filled from an older run; the reload replaces it with the final one.
+OPENMETEO_RELOAD_DAYS = 2
 # A backfill loads ČNB from this many days earlier, so the first delivery days (e.g. the
 # 1 January holiday) have a preceding fixing to carry forward.
 CNB_BACKFILL_LOOKBACK_DAYS = 14
@@ -94,10 +98,16 @@ def load_chmi(client: httpx.Client, warehouse: Warehouse, task: Task, run_id: st
     return rows
 
 
+def load_openmeteo(client: httpx.Client, warehouse: Warehouse, task: Task, run_id: str) -> int:
+    forecasts = openmeteo.fetch_forecasts(client, task.business_date, task.period_end)
+    return warehouse.upsert(OPENMETEO_FORECASTS, to_rows(forecasts), run_id)
+
+
 LOADERS: dict[Source, Callable[[httpx.Client, Warehouse, Task, str], int]] = {
     "ote": load_ote,
     "cnb": load_cnb,
     "chmi": load_chmi,
+    "openmeteo": load_openmeteo,
 }
 
 
@@ -108,6 +118,11 @@ def daily_tasks(today: date) -> list[Task]:
         Task("ote", today),
         Task("cnb", today),
         *(Task("chmi", today - timedelta(days=n)) for n in range(1, CHMI_RELOAD_DAYS + 1)),
+        Task(
+            "openmeteo",
+            today - timedelta(days=OPENMETEO_RELOAD_DAYS),
+            today + timedelta(days=1),
+        ),
     ]
 
 
@@ -130,7 +145,7 @@ def _next_year(day: date) -> date:
 
 def backfill_tasks(start: date, end: date, sources: Iterable[Source] = SOURCES) -> list[Task]:
     """Split start..end into the chunks each source serves best (docs/sources.md section 4):
-    OTE per day, ČNB per calendar year, ČHMÚ per calendar month."""
+    OTE per day, ČNB per calendar year, ČHMÚ and Open-Meteo per calendar month."""
     tasks: list[Task] = []
     for source in sources:
         if source == "ote":
@@ -139,7 +154,7 @@ def backfill_tasks(start: date, end: date, sources: Iterable[Source] = SOURCES) 
             cnb_start = start - timedelta(days=CNB_BACKFILL_LOOKBACK_DAYS)
             tasks += [Task("cnb", s, e) for s, e in _periods(cnb_start, end, _next_year)]
         else:
-            tasks += [Task("chmi", s, e) for s, e in _periods(start, end, _next_month)]
+            tasks += [Task(source, s, e) for s, e in _periods(start, end, _next_month)]
     return tasks
 
 

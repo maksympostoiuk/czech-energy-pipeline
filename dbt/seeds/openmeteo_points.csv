@@ -1,0 +1,15 @@
+point_id,name,country,point_group,latitude,longitude
+0-20000-0-11520,Praha-Libuš,CZ,cz,50.007778,14.446944
+0-20000-0-11723,Brno-Tuřany,CZ,cz,49.153056,16.688889
+0-20000-0-11782,Ostrava-Mošnov,CZ,cz,49.691944,18.112778
+0-20000-0-11450,Plzeň-Mikulka,CZ,cz,49.764722,13.378889
+0-20000-0-11546,České Budějovice,CZ,cz,48.951944,14.469722
+0-20000-0-11502,Ústí nad Labem,CZ,cz,50.68333,14.04111
+0-20000-0-11628,Košetice,CZ,cz,49.573504,15.08046
+0-20000-0-11774,Holešov,CZ,cz,49.320556,17.57
+de-muenchen,München,DE,de_solar,48.14,11.58
+de-nuernberg,Nürnberg,DE,de_solar,49.45,11.08
+de-stuttgart,Stuttgart,DE,de_solar,48.78,9.18
+de-husum,Husum,DE,de_wind,54.48,9.05
+de-emden,Emden,DE,de_wind,53.37,7.21
+de-magdeburg,Magdeburg,DE,de_wind,52.13,11.63

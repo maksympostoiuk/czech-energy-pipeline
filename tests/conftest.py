@@ -7,6 +7,7 @@ import pytest
 from tenacity import wait_none
 
 from energy_pipeline import http
+from energy_pipeline.extract import openmeteo
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -38,3 +39,9 @@ def no_retry_wait() -> Iterator[None]:
     http._get.retry.wait = wait_none()
     yield
     http._get.retry.wait = original
+
+
+@pytest.fixture(autouse=True)
+def no_open_meteo_pacing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Request spacing for the API limits is real time: tests must not wait for it."""
+    monkeypatch.setattr(openmeteo, "_pacer", openmeteo._Pacer(float("inf")))

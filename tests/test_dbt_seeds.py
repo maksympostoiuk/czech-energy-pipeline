@@ -4,7 +4,7 @@ import csv
 from datetime import date
 from pathlib import Path
 
-from energy_pipeline.extract import chmi, ote
+from energy_pipeline.extract import chmi, openmeteo, ote
 
 SEEDS = Path(__file__).parent.parent / "dbt" / "seeds"
 
@@ -26,3 +26,12 @@ def test_selected_stations_match_extractor() -> None:
     seed_stations = [r["station_id"] for r in read_seed("chmi_stations_selected")]
 
     assert sorted(seed_stations) == sorted(chmi.STATIONS)
+
+
+def test_forecast_points_match_extractor() -> None:
+    seed_points = {
+        (r["point_id"], r["name"], float(r["latitude"]), float(r["longitude"]))
+        for r in read_seed("openmeteo_points")
+    }
+
+    assert seed_points == {(p.point_id, p.name, p.latitude, p.longitude) for p in openmeteo.POINTS}

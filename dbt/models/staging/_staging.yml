@@ -163,3 +163,85 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: [invocation_id, unique_id]
+
+  - name: stg_openmeteo__forecasts
+    description: >
+      Open-Meteo weather forecasts as issued (DWD ICON-EU via the Previous Runs API), one row
+      per point, valid hour and lead. Only runs no later than issued_at_utc contributed.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [point_id, model, valid_at_utc, lead_days]
+      - dbt_utils.expression_is_true:
+          name: openmeteo_issued_at_is_the_run_lead_days_before
+          arguments:
+            expression: >
+              issued_at_utc = time_bucket(interval 6 hour, valid_at_utc - to_days(lead_days))
+    columns:
+      - name: point_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('openmeteo_points')
+                field: point_id
+      - name: model
+        description: Open-Meteo model name.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [dwd_icon_eu]
+      - name: valid_at_utc
+        description: Hour the forecast is for (instantaneous values at that time).
+        data_tests:
+          - not_null
+          - dbt_expectations.expect_row_values_to_have_recent_data:
+              arguments:
+                datepart: day
+                interval: 1
+              config:
+                tags: [freshness]
+      - name: lead_days
+        description: The value was predicted this many days before valid_at_utc.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [1, 2]
+      - name: issued_at_utc
+        description: Latest possible initialisation of the run behind the values, floor_6h(valid_at_utc - lead_days).
+        data_tests: [not_null]
+      - name: radiation_hour_start_utc
+        description: Start of the hour shortwave_radiation_wm2 is the mean of (valid_at_utc - 1 h).
+      - name: temperature_2m_c
+        data_tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: -50
+                max_value: 50
+      - name: shortwave_radiation_wm2
+        description: Global horizontal irradiance, mean over the hour before valid_at_utc.
+        data_tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+                max_value: 1361  # solar constant
+      - name: wind_speed_10m_ms
+        data_tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+                max_value: 75
+      - name: wind_speed_100m_ms
+        description: Wind speed at 100 m, close to wind turbine hub height.
+        data_tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+                max_value: 100
+      - name: cloud_cover_pct
+        data_tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+                max_value: 100
+      - name: ingested_at

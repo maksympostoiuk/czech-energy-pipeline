@@ -9,7 +9,12 @@ st.caption(
     "quality tests; the results land in the warehouse and are shown here."
 )
 
-SOURCE_NAMES = {"ote": "OTE day-ahead prices", "cnb": "ČNB exchange rates", "chmi": "ČHMÚ weather"}
+SOURCE_NAMES = {
+    "ote": "OTE day-ahead prices",
+    "cnb": "ČNB exchange rates",
+    "chmi": "ČHMÚ weather",
+    "openmeteo": "Open-Meteo forecasts",
+}
 # Same thresholds as dbt source freshness: warn after 26 h, error after 50 h.
 STATUS = [(26, "✅", "Fresh"), (50, "⚠️", "Late"), (float("inf"), "❌", "Stale")]
 

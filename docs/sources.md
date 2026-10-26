@@ -207,6 +207,7 @@ including global radiation. Praha-Ruzyně was skipped because it has no `RGLB10`
 | OTE | D+1, plus re-fetch D | an empty `dataLine` for D+1 means "retry later", not a failure |
 | ČNB | today | upsert on `(validFor, currencyCode)` |
 | ČHMÚ | D-1…D-7, each from `recent/` (quality-checked, has D-1 by ~12:15 UTC) or else `now/` | picks up quality-control corrections; `source_folder` records which one |
+| Open-Meteo | valid dates D-2…D+1 (UTC), all 14 points in one request | a value whose run was not out yet is filled from an older run; the next day's reload replaces it with the final one |
 
 **Backfill from 2024-01-01** (`pipeline backfill --from 2024-01-01 [--to …] [--source …] [--resume]`).
 Requests are throttled to one every 0.25 s per host. Every chunk is logged in `ops.pipeline_runs`
@@ -219,6 +220,7 @@ with `business_date..period_end`, and `--resume` skips chunks that already succe
 | ČHMÚ 2024–2025 (`historical_csv`) | 8 stations × 6 elements × 24 months = 1,152 files | ~230 MB |
 | ČHMÚ 2026 (`recent/{MM}/` monthly JSON, all elements) | 8 × 9 files | ~420 MB, filtered to our elements |
 | ČHMÚ current month (daily files) | 8 per day | ~1.5 MB per day |
+| Open-Meteo (Previous Runs, ICON-EU) | 1 per calendar month, 14 points × 10 variables; spaced to ≤ 300 API calls a minute | ~0.7 million rows |
 
 ČHMÚ is backfilled one task per calendar month. For each station the archives are tried from the
 most to the least compact: historical CSV (a 404 on the first element means the year is not

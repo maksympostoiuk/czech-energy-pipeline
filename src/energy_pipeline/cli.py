@@ -62,7 +62,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="business date YYYY-MM-DD (default: today in Europe/Prague)",
     )
     subcommands.add_parser(
-        "daily", help="the scheduled run: tomorrow's prices, FX, last week's weather"
+        "daily", help="the scheduled run: tomorrow's prices, FX, weather and weather forecasts"
     )
     backfill = subcommands.add_parser("backfill", parents=[sources], help="load a date range")
     backfill.add_argument("--from", dest="start", type=date.fromisoformat, required=True)

@@ -25,6 +25,10 @@ sources:
         description: Snapshot of ČHMÚ station metadata (meta1), all stations.
         config:
           freshness: null
+      - name: openmeteo_forecasts
+        description: >
+          Open-Meteo Previous Runs forecasts (DWD ICON-EU): per point and valid hour, the values
+          predicted one and two days before, with issued_at, the latest possible run time.
 
   - name: ops
     schema: ops

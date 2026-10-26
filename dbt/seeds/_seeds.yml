@@ -37,3 +37,27 @@ seeds:
       - name: delivery_date
         data_tests: [unique, not_null]
       - name: reason
+
+  - name: openmeteo_points
+    description: >
+      Points the Open-Meteo forecasts are loaded for (src/energy_pipeline/extract/openmeteo.py
+      POINTS, checked by a pytest test): the 8 ČHMÚ stations and six German solar and wind
+      regions. See docs/sources.md, section 5.
+    columns:
+      - name: point_id
+        description: ČHMÚ WSI for the Czech stations, de-<city> for the German points.
+        data_tests: [unique, not_null]
+      - name: name
+      - name: country
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [CZ, DE]
+      - name: point_group
+        description: cz (national weather signal), de_solar (Bavaria, Baden-Württemberg) or de_wind (north).
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [cz, de_solar, de_wind]
+      - name: latitude
+      - name: longitude

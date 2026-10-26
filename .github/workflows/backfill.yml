@@ -14,7 +14,7 @@ on:
       source:
         description: Source to load
         type: choice
-        options: [all, ote, cnb, chmi]
+        options: [all, ote, cnb, chmi, openmeteo]
         default: all
       resume:
         description: Skip periods that already loaded successfully

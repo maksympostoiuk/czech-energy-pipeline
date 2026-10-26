@@ -5,7 +5,7 @@ import httpx
 import pytest
 import respx
 
-from energy_pipeline.extract import chmi, cnb, ote
+from energy_pipeline.extract import chmi, cnb, openmeteo, ote
 from energy_pipeline.http import make_client
 from energy_pipeline.load.warehouse import Warehouse
 from energy_pipeline.pipeline import (
@@ -29,7 +29,7 @@ def warehouse() -> Iterator[Warehouse]:
 
 @pytest.fixture
 def api(load_fixture) -> Iterator[respx.MockRouter]:
-    """All three sources answering with the stored real responses for DAY."""
+    """All sources answering with the stored real responses for DAY."""
     with respx.mock(assert_all_called=False) as router:
         router.get(ote.URL).mock(
             return_value=httpx.Response(200, json=load_fixture("ote/dam_2026-10-21_15min.json"))
@@ -51,6 +51,17 @@ def api(load_fixture) -> Iterator[respx.MockRouter]:
             router.get(chmi.DAY_FILE_URLS["recent"].format(wsi=station_id, day=DAY)).mock(
                 return_value=httpx.Response(200, json=payload)
             )
+        # Every forecast point gets Praha's forecast, moved to the point's coordinates.
+        praha = load_fixture("openmeteo/previous_icon_eu_2026-10-24_2loc.json")[0]
+        router.get(openmeteo.URL).mock(
+            return_value=httpx.Response(
+                200,
+                json=[
+                    {**praha, "latitude": point.latitude, "longitude": point.longitude}
+                    for point in openmeteo.POINTS
+                ],
+            )
+        )
         yield router
 
 
@@ -60,7 +71,13 @@ def run(warehouse: Warehouse, tasks: list[Task]):
 
 
 def counts(warehouse: Warehouse) -> dict[str, int]:
-    tables = ("ote_dam_results", "cnb_fx_rates", "chmi_observations", "chmi_stations")
+    tables = (
+        "ote_dam_results",
+        "cnb_fx_rates",
+        "chmi_observations",
+        "chmi_stations",
+        "openmeteo_forecasts",
+    )
     return {
         table: warehouse.con.execute(f"SELECT count(*) FROM raw.{table}").fetchone()[0]
         for table in tables
@@ -75,13 +92,14 @@ def test_run_loads_all_sources_idempotently(warehouse: Warehouse) -> None:
     after_first = counts(warehouse)
     run(warehouse, tasks)
 
-    assert [r.status for r in first] == ["success"] * 3
+    assert [r.status for r in first] == ["success"] * 4
     assert after_first["ote_dam_results"] == 96
     assert after_first["cnb_fx_rates"] == 30
     assert after_first["chmi_observations"] == len(chmi.STATIONS) * len(chmi.ELEMENTS) * 144
     assert after_first["chmi_stations"] > 0
+    assert after_first["openmeteo_forecasts"] == len(openmeteo.POINTS) * 48 * 2
     assert counts(warehouse) == after_first
-    assert warehouse.con.execute("SELECT count(*) FROM ops.pipeline_runs").fetchone()[0] == 6
+    assert warehouse.con.execute("SELECT count(*) FROM ops.pipeline_runs").fetchone()[0] == 8
 
 
 def test_failed_source_does_not_stop_others(warehouse: Warehouse, api: respx.MockRouter) -> None:
@@ -117,6 +135,7 @@ def test_daily_tasks() -> None:
     chmi_days = sorted(t.business_date for t in tasks if t.source == "chmi")
     assert chmi_days[0] == date(2026, 10, 15)
     assert chmi_days[-1] == date(2026, 10, 21)
+    assert Task("openmeteo", date(2026, 10, 20), date(2026, 10, 23)) in tasks
 
 
 def test_backfill_tasks_chunk_per_source() -> None:
@@ -133,6 +152,9 @@ def test_backfill_tasks_chunk_per_source() -> None:
         Task("chmi", date(2024, 12, 30), date(2024, 12, 31)),
         Task("chmi", date(2025, 1, 1), date(2025, 1, 31)),
         Task("chmi", date(2025, 2, 1), date(2025, 2, 2)),
+    ]
+    assert [(t.business_date, t.until) for t in by_source["openmeteo"]] == [
+        (t.business_date, t.until) for t in by_source["chmi"]
     ]
 
 

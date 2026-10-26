@@ -45,7 +45,7 @@ jobs:
 
       # The steps below keep going after a failure, so one broken source still gets the
       # other sources transformed and every result recorded; the last step fails the job.
-      - name: Extract and load (tomorrow's prices, FX, last week's weather)
+      - name: Extract and load (tomorrow's prices, FX, last week's weather, weather forecasts)
         id: load
         continue-on-error: true
         run: uv run pipeline daily
