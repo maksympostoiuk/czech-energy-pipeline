@@ -1,0 +1,130 @@
+version: 2
+
+models:
+  - name: ml_features_hourly
+    description: >
+      Features for the day-ahead price forecast, one row per UTC hour of delivery day D+1,
+      exactly as known at the cutoff: 12:00 Prague time on the forecast date D, when the
+      auction closes. Calendar, prices of delivery days up to D, and Open-Meteo forecasts
+      published before the cutoff. Rows reach one day past the last published prices, so
+      tomorrow's hours exist with a null target. Observed weather is deliberately absent
+      (see ml_oracle_weather_hourly).
+    data_tests:
+      - dbt_utils.expression_is_true:
+          name: ml_features_use_no_prices_after_the_forecast_date
+          arguments:
+            expression: "known_prices_through <= forecast_date"
+      - dbt_utils.expression_is_true:
+          name: ml_features_use_no_weather_published_after_the_cutoff
+          arguments:
+            expression: >
+              weather_latest_run_utc
+              + to_hours({{ var('openmeteo_publication_delay_hours') }}) <= cutoff_at_utc
+      - dbt_utils.expression_is_true:
+          name: ml_features_forecast_date_is_the_day_before
+          arguments:
+            expression: "forecast_date = delivery_date - 1"
+      - dbt_utils.expression_is_true:
+          name: ml_features_cutoff_is_noon_in_prague_on_the_forecast_date
+          arguments:
+            expression: >
+              cutoff_at_utc = (forecast_date::timestamp
+              + to_hours({{ var('forecast_cutoff_hour_local') }})) at time zone 'Europe/Prague'
+      - dbt_utils.expression_is_true:
+          name: ml_features_have_a_weather_forecast_for_every_priced_hour
+          arguments:
+            expression: "cz_temperature_c is not null and cz_wind_10m_ms is not null"
+          config:
+            where: "price_eur_mwh is not null"
+    columns:
+      - name: hour_start_utc
+        description: Start of the delivery hour (the grain).
+        data_tests: [unique, not_null]
+      - name: delivery_date
+        description: Delivery day D+1 in Europe/Prague.
+        data_tests: [not_null]
+      - name: forecast_date
+        description: Day D the forecast is made.
+        data_tests: [not_null]
+      - name: cutoff_at_utc
+        description: 12:00 Prague time on forecast_date, in UTC. Nothing later is used.
+        data_tests: [not_null]
+      - name: hour_start_local
+      - name: local_hour
+      - name: hour_index
+        description: 0-based position of the hour in the delivery day (unique on DST days).
+      - name: hours_in_day
+        description: 23, 24 or 25.
+      - name: is_peak
+        description: Local hour in 08:00-20:00 (OTE peak load).
+      - name: day_of_week
+        description: 1 = Monday.
+      - name: is_weekend
+      - name: is_holiday
+        description: Czech public holiday.
+      - name: is_business_day
+      - name: is_next_day_business_day
+        description: The day after the delivery day is a business day (bridge days).
+      - name: is_previous_day_business_day
+      - name: month
+      - name: season
+      - name: day_of_year
+      - name: price_same_hour_d
+        description: Price at the same local hour on D, the "yesterday" benchmark (EUR/MWh).
+      - name: price_same_hour_week_ago
+        description: Price at the same local hour on D-6, one week before the delivery day.
+      - name: price_same_hour_mean_7d
+        description: Mean price at the same local hour on D-6..D.
+      - name: price_same_hour_min_7d
+      - name: price_same_hour_max_7d
+      - name: base_d
+        description: Base (mean) price of D.
+      - name: peak_d
+      - name: offpeak_d
+      - name: min_price_d
+      - name: max_price_d
+      - name: std_price_d
+        description: Standard deviation of D's hourly prices.
+      - name: negative_hours_d
+        description: Hours of D with a negative price.
+      - name: base_d_minus_1
+      - name: base_mean_7d
+        description: Mean of the daily base prices of D-6..D.
+      - name: cz_temperature_c
+        description: Forecast 2 m temperature, mean of the 8 Czech points.
+      - name: cz_radiation_wm2
+        description: Forecast global radiation over the hour, mean of the 8 Czech points.
+      - name: cz_wind_10m_ms
+      - name: cz_wind_100m_ms
+        description: Forecast wind at 100 m (turbine hub height); null before 2024-02-16.
+      - name: cz_cloud_cover_pct
+      - name: de_solar_radiation_wm2
+        description: Forecast radiation, mean of München, Nürnberg and Stuttgart.
+      - name: de_wind_100m_ms
+        description: Forecast wind at 100 m, mean of Husum, Emden and Magdeburg; null before 2024-02-16.
+      - name: cz_temperature_day_mean_c
+        description: Mean of cz_temperature_c over the delivery day.
+      - name: cz_radiation_day_mean_wm2
+      - name: de_solar_radiation_day_mean_wm2
+      - name: de_wind_100m_day_mean_ms
+      - name: known_prices_through
+        description: Latest delivery day whose prices the row uses (must be <= forecast_date).
+      - name: weather_latest_run_utc
+        description: Latest possible run initialisation behind the row's weather values.
+      - name: weather_max_lead_days
+        description: Longest lead among the row's weather values (1 or 2 days).
+      - name: price_eur_mwh
+        description: Target, the actual hourly price; null for hours not published yet.
+
+  - name: ml_oracle_weather_hourly
+    description: >
+      Observed Czech weather (ČHMÚ station mean) for the hours of ml_features_hourly. Not
+      known at the cutoff: only for the "perfect weather forecast" experiment, the upper
+      bound of what a better forecast could add. Never used by the production model.
+    columns:
+      - name: hour_start_utc
+        data_tests: [unique, not_null]
+      - name: cz_temperature_c
+      - name: cz_radiation_wm2
+      - name: cz_wind_10m_ms
+      - name: reporting_stations

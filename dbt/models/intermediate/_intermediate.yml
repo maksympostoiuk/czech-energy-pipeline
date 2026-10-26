@@ -38,3 +38,43 @@ models:
         data_tests: [unique, not_null]
       - name: reporting_stations
         description: Number of stations with usable data in the hour (8 when complete).
+
+  - name: int_delivery_hours
+    description: >
+      Every UTC hour of every delivery day (23/24/25 per day) with the price forecast's
+      forecast date (the day before) and cutoff (12:00 Prague time on that day, when the
+      day-ahead auction closes).
+    columns:
+      - name: hour_start_utc
+        data_tests: [unique, not_null]
+      - name: delivery_date
+        description: Delivery day in Europe/Prague.
+      - name: forecast_date
+        description: Day the forecast for delivery_date is made, delivery_date - 1.
+      - name: cutoff_at_utc
+        description: 12:00 Prague time on forecast_date (var forecast_cutoff_hour_local), in UTC.
+      - name: hour_start_local
+        description: Prague wall-clock start of the hour (02:00 repeats on the autumn DST day).
+      - name: local_hour
+        description: Wall-clock hour 0-23; on DST days one value is missing or repeated.
+      - name: hour_index
+        description: 0-based position of the hour in its delivery day, unique on DST days too.
+      - name: hours_in_day
+
+  - name: int_openmeteo_forecast_at_cutoff
+    description: >
+      For every delivery hour and forecast point, the freshest Open-Meteo forecast already
+      published at that delivery day's cutoff (issued_at_utc plus var
+      openmeteo_publication_delay_hours no later than cutoff_at_utc). Radiation comes from
+      the row valid one hour later, because Open-Meteo labels the hourly mean by its end.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [hour_start_utc, point_id]
+    columns:
+      - name: lead_days
+        description: Lead of the instantaneous variables (1 or 2 days).
+      - name: radiation_lead_days
+        description: Lead of the radiation value, which can differ at the 06:00 UTC boundary.
+      - name: latest_run_utc
+        description: Latest possible run initialisation behind any value of the row.

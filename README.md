@@ -6,7 +6,7 @@
 A production-style ELT pipeline for the Czech electricity market. Every day it loads
 **day-ahead prices from OTE**, **EUR/CZK fixings from ČNB**, **weather observations from
 ČHMÚ** and **weather forecasts as issued before the auction from Open-Meteo**, models them
-with **dbt** on **DuckDB / MotherDuck**, checks them with **93 dbt data tests plus source
+with **dbt** on **DuckDB / MotherDuck**, checks them with **109 dbt data tests plus source
 freshness**, including a reconciliation with OTE's official reports, and publishes a **Streamlit**
 dashboard. GitHub Actions runs everything on a schedule, at zero cost.
 
@@ -22,7 +22,7 @@ dashboard. GitHub Actions runs everything on a schedule, at zero cost.
 - **Sources:** OTE day-ahead market (CZ bidding zone), ČNB exchange rate fixing, 8 ČHMÚ weather stations (10-minute data), Open-Meteo forecasts (DWD ICON-EU) for those stations and 6 German solar and wind regions
 - **History:** since 1 January 2024: ~52,000 market periods, ~7.1 million weather observations, updated daily
 - **Stack:** Python 3.12 · httpx · pydantic · DuckDB / MotherDuck · dbt-core + dbt-duckdb · GitHub Actions · Streamlit · uv · ruff · pytest
-- **Quality:** 93 dbt data tests + source freshness, 113 pytest tests, CI on every push; daily indices equal OTE's official figures to the cent
+- **Quality:** 109 dbt data tests + source freshness, 115 pytest tests, CI on every push; daily indices equal OTE's official figures to the cent
 
 ## Architecture
 
@@ -32,7 +32,7 @@ flowchart LR
 
     subgraph GHA["GitHub Actions · daily"]
         EL["Python extract + load<br/>pydantic validation, retries"]
-        DBT["dbt build<br/>staging → intermediate → marts<br/>93 data tests"]
+        DBT["dbt build<br/>staging → intermediate → marts, ml<br/>109 data tests"]
     end
 
     subgraph MD["MotherDuck"]
@@ -101,8 +101,9 @@ and multi-series charts carry direct labels and a table view.
 |---|---|---|
 | reference (seeds) | Czech public holidays, selected stations, forecast points, physical ranges, known incomplete OTE days, official OTE indices for reconciliation | table |
 | staging | `stg_ote__dam_prices`, `stg_cnb__fx_rates`, `stg_chmi__observations`, `stg_chmi__stations`, `stg_openmeteo__forecasts`, `stg_ops__pipeline_runs`, `stg_ops__dbt_results` | view |
-| intermediate | `int_fx_eur_czk_daily`, `int_dam_prices_czk`, `int_weather_hourly_station`, `int_weather_hourly_cz` | view |
+| intermediate | `int_fx_eur_czk_daily`, `int_dam_prices_czk`, `int_weather_hourly_station`, `int_weather_hourly_cz`, `int_delivery_hours`, `int_openmeteo_forecast_at_cutoff` | view |
 | marts | `dim_date`, `dim_station`, `fct_dam_prices` (incremental), `fct_dam_prices_hourly`, `fct_daily_market_summary`, `mart_price_vs_weather` | table |
+| ml | `ml_features_hourly` (features of each delivery hour as known at 12:00 Prague time the day before), `ml_oracle_weather_hourly` (observed weather, for the perfect-forecast experiment only) | table |
 
 Column-level documentation and the lineage graph are in the
 [dbt docs](https://maksympostoiuk.github.io/czech-energy-pipeline/).
@@ -136,7 +137,7 @@ Requires [uv](https://docs.astral.sh/uv/).
 ```bash
 uv sync                                       # Python 3.12 and all dependencies
 cp .env.example .env                          # local settings; secrets stay out of git
-uv run pytest                                 # 113 tests, no network needed
+uv run pytest                                 # 115 tests, no network needed
 uv run pipeline backfill --from 2024-01-01    # history into data/warehouse.duckdb (~15 min)
 cd dbt && uv run dbt deps && uv run dbt build && cd ..
 uv run streamlit run dashboard/app.py

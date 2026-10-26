@@ -23,6 +23,16 @@ vars:
   sdac_max_price_eur_mwh: 4000
   # Used by dbt_date / dbt_expectations for "now" in recency tests.
   "dbt_date:time_zone": Europe/Prague
+  # The price forecast for delivery day D+1 is made on D before the day-ahead auction
+  # closes at 12:00 Prague time; every feature must be known by then.
+  forecast_cutoff_hour_local: 12
+  # A weather model run is assumed published this long after its initialisation time.
+  # ICON-EU is served ~3 h after (docs/sources.md, section 5); 6 h keeps a margin and
+  # leaves the 00Z run of D as the latest one used, in summer and in winter.
+  openmeteo_publication_delay_hours: 6
+  # First delivery day with every feature: the forecast archive has both leads for every
+  # hour from 2024-01-21, and a week of price history exists by then.
+  ml_first_delivery_date: "2024-01-22"
 
 models:
   czech_energy:
@@ -34,6 +44,9 @@ models:
       +materialized: view
     marts:
       +schema: marts
+      +materialized: table
+    ml:
+      +schema: ml
       +materialized: table
 
 seeds:
