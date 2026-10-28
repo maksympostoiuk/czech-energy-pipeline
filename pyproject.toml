@@ -16,6 +16,7 @@ dependencies = [
 
 [project.scripts]
 pipeline = "energy_pipeline.cli:main"
+forecast = "energy_pipeline.forecast.cli:main"
 
 [dependency-groups]
 dashboard = [
@@ -31,9 +32,14 @@ dev = [
     "respx>=0.23.1",
     "ruff>=0.8",
 ]
+ml = [
+    "lightgbm>=4.7.0",
+    "pandas>=3.1.0",
+    "scikit-learn>=1.9.1",
+]
 
 [tool.uv]
-default-groups = ["dev", "dbt", "dashboard"]
+default-groups = ["dev", "dbt", "dashboard", "ml"]
 
 [build-system]
 requires = ["hatchling"]
