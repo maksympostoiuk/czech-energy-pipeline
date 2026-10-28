@@ -13,6 +13,7 @@ from energy_pipeline.pipeline import (
     Task,
     backfill_tasks,
     daily_tasks,
+    morning_tasks,
     pending,
     run_tasks,
 )
@@ -136,6 +137,13 @@ def test_daily_tasks() -> None:
     assert chmi_days[0] == date(2026, 10, 15)
     assert chmi_days[-1] == date(2026, 10, 21)
     assert Task("openmeteo", date(2026, 10, 20), date(2026, 10, 23)) in tasks
+
+
+def test_morning_tasks_feed_the_price_forecast() -> None:
+    assert morning_tasks(TODAY) == [
+        Task("ote", TODAY),
+        Task("openmeteo", date(2026, 10, 20), date(2026, 10, 23)),
+    ]
 
 
 def test_backfill_tasks_chunk_per_source() -> None:

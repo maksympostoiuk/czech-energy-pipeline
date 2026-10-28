@@ -132,6 +132,35 @@ with Germany's through SDAC.
 - The model knows nothing about fuel and CO2 prices, cross-border flows or outages, which
   explains much of the autumn error.
 
+## In production
+
+`.github/workflows/forecast.yml` runs at 04:13, 06:37 and 08:53 UTC, so at least one run
+lands before the auction closes at 12:00 Prague time even when GitHub delays scheduled
+jobs by hours:
+
+1. `pipeline morning` loads today's prices (in case the afternoon run was late) and the
+   weather forecasts of the overnight runs.
+2. dbt builds `ml.ml_features_hourly` and its upstream models.
+3. `forecast predict` checks that tomorrow's features are complete (every hour, today's
+   prices, the weather forecast) and fails loudly otherwise, refits LightGBM and the two
+   benchmarks on every delivery day up to today, and stores tomorrow's forecast in
+   `ml.price_forecast`: price, p10/p50/p90, `issued_at`, `is_late` (issued after the
+   cutoff), `model_version` and `code_version` (the commit).
+
+A run that finds tomorrow's forecast already stored stops, so a backup run never replaces
+an on-time forecast. A late run still uses only data known at the cutoff, because the
+features are defined by the cutoff, not by the time the job runs; `is_late` marks it.
+
+The afternoon `daily.yml` build scores forecasts once OTE publishes the prices:
+`ml.ml_forecast_accuracy_hourly` (error per hour, inside the interval or not) and
+`ml.ml_forecast_daily_metrics` (MAE, RMSE, bias, coverage per day and model). A source
+freshness check on `ml.price_forecast` warns after 26 hours without a new forecast.
+
+`forecast backfill-history --from 2026-03-01` (or the workflow's `history_from` input)
+stores the walk-forward forecasts of the same models as `run_type = 'backtest'`, so the
+dashboard has a track record from the start; they reproduce the test results above
+(MAE 21.29 vs 32.45).
+
 ## Reproduce
 
 ```bash

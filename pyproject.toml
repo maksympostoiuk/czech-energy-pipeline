@@ -81,3 +81,7 @@ addopts = "-ra --strict-markers"
 markers = [
     "integration: tests that call real external APIs (deselect with -m 'not integration')",
 ]
+filterwarnings = [
+    # Raised inside DuckDB's .df() under pandas 3.1, not by this code.
+    "ignore:The inplace keyword in DataFrame.drop is deprecated",
+]

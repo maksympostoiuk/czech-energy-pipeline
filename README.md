@@ -6,7 +6,7 @@
 A production-style ELT pipeline for the Czech electricity market. Every day it loads
 **day-ahead prices from OTE**, **EUR/CZK fixings from ČNB**, **weather observations from
 ČHMÚ** and **weather forecasts as issued before the auction from Open-Meteo**, models them
-with **dbt** on **DuckDB / MotherDuck**, checks them with **109 dbt data tests plus source
+with **dbt** on **DuckDB / MotherDuck**, checks them with **118 dbt data tests plus source
 freshness**, including a reconciliation with OTE's official reports, and publishes a **Streamlit**
 dashboard. GitHub Actions runs everything on a schedule, at zero cost.
 
@@ -22,7 +22,7 @@ dashboard. GitHub Actions runs everything on a schedule, at zero cost.
 - **Sources:** OTE day-ahead market (CZ bidding zone), ČNB exchange rate fixing, 8 ČHMÚ weather stations (10-minute data), Open-Meteo forecasts (DWD ICON-EU) for those stations and 6 German solar and wind regions
 - **History:** since 1 January 2024: ~52,000 market periods, ~7.1 million weather observations, updated daily
 - **Stack:** Python 3.12 · httpx · pydantic · DuckDB / MotherDuck · dbt-core + dbt-duckdb · GitHub Actions · Streamlit · uv · ruff · pytest
-- **Quality:** 109 dbt data tests + source freshness, 130 pytest tests, CI on every push; daily indices equal OTE's official figures to the cent
+- **Quality:** 118 dbt data tests + source freshness, 138 pytest tests, CI on every push; daily indices equal OTE's official figures to the cent
 
 ## Architecture
 
@@ -32,7 +32,7 @@ flowchart LR
 
     subgraph GHA["GitHub Actions · daily"]
         EL["Python extract + load<br/>pydantic validation, retries"]
-        DBT["dbt build<br/>staging → intermediate → marts, ml<br/>109 data tests"]
+        DBT["dbt build<br/>staging → intermediate → marts, ml<br/>118 data tests"]
     end
 
     subgraph MD["MotherDuck"]
@@ -137,7 +137,7 @@ Requires [uv](https://docs.astral.sh/uv/).
 ```bash
 uv sync                                       # Python 3.12 and all dependencies
 cp .env.example .env                          # local settings; secrets stay out of git
-uv run pytest                                 # 130 tests, no network needed
+uv run pytest                                 # 138 tests, no network needed
 uv run pipeline backfill --from 2024-01-01    # history into data/warehouse.duckdb (~15 min)
 cd dbt && uv run dbt deps && uv run dbt build && cd ..
 uv run streamlit run dashboard/app.py
@@ -157,6 +157,7 @@ uv run streamlit run dashboard/app.py
 |---|---|---|
 | `ci.yml` | push to `main`, pull requests | ruff, pytest, `dbt build --empty`, dashboard render test |
 | `daily.yml` | 14:17 and 16:47 UTC, manual | `pipeline daily` → `dbt source freshness` → `dbt build` → results into `ops.dbt_results` |
+| `forecast.yml` | 04:13, 06:37 and 08:53 UTC, manual | `pipeline morning` → `dbt build` of the features → `forecast predict`: tomorrow's hourly price forecast into `ml.price_forecast` before the 12:00 auction; later runs find it and stop |
 | `backfill.yml` | manual | `pipeline backfill` → `dbt build --full-refresh` |
 | `docs.yml` | changes in `dbt/`, manual | `dbt docs generate --static` → GitHub Pages |
 

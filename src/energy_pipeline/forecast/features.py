@@ -86,8 +86,8 @@ def load(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
         order by features.hour_start_utc
         """
     ).df()
-    frame["delivery_date"] = pd.to_datetime(frame["delivery_date"]).dt.date
-    frame["forecast_date"] = pd.to_datetime(frame["forecast_date"]).dt.date
+    for column in ("delivery_date", "forecast_date", "known_prices_through"):
+        frame[column] = pd.to_datetime(frame[column]).dt.date
     return frame
 
 

@@ -37,3 +37,19 @@ sources:
         description: One row per extract + load task, written by the pipeline CLI.
       - name: dbt_results
         description: dbt test, model and source freshness results, recorded after every scheduled run.
+
+  - name: ml
+    description: Written by the Python forecast job (`forecast predict`, `forecast backfill-history`).
+    schema: ml
+    tables:
+      - name: price_forecast
+        description: >
+          Day-ahead price forecasts, one row per delivery hour, model and run type: 'live' rows
+          are issued every morning before the auction, 'backtest' rows are walk-forward
+          forecasts of the same models for the history.
+        config:
+          # The forecast job runs every morning; a day without a new forecast is an incident.
+          loaded_at_field: _ingested_at
+          freshness:
+            warn_after: {count: 26, period: hour}
+            error_after: {count: 50, period: hour}

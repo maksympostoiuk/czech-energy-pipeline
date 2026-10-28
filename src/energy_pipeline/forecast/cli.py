@@ -5,8 +5,12 @@
     forecast importance   SHAP feature importance of the LightGBM model
     forecast report       execute forecasting/report.ipynb (--refresh re-runs the above)
 
-Results are written to data/forecast/ and printed. All read the local warehouse
-(data/warehouse.duckdb) after `dbt build`; run them from the repository root.
+    forecast predict            production: forecast tomorrow into ml.price_forecast
+    forecast backfill-history   production: walk-forward rows for the dashboard's history
+
+The evaluation commands write to data/forecast/ and read the local warehouse
+(data/warehouse.duckdb) after `dbt build`; run them from the repository root. The
+production commands use the configured warehouse (MotherDuck with PIPELINE_ENV=prod).
 """
 
 import argparse
@@ -15,13 +19,15 @@ import os
 import sys
 import time
 from collections.abc import Callable
+from datetime import date, datetime
 from pathlib import Path
 
 import duckdb
 import pandas as pd
 
 from energy_pipeline.config import get_settings
-from energy_pipeline.forecast import features, metrics
+from energy_pipeline.extract.ote import PRAGUE
+from energy_pipeline.forecast import features, metrics, production
 from energy_pipeline.forecast.backtest import (
     TEST,
     VALIDATION,
@@ -38,6 +44,7 @@ from energy_pipeline.forecast.models import (
     week_ago,
     yesterday,
 )
+from energy_pipeline.load.warehouse import Warehouse
 
 OUTPUT = Path("data/forecast")
 NOTEBOOK = Path("forecasting/report.ipynb")
@@ -193,6 +200,19 @@ def main(argv: list[str] | None = None) -> int:
     report_parser.add_argument(
         "--refresh", action="store_true", help="re-run validate, backtest and importance first"
     )
+    predict = commands.add_parser("predict", help="forecast tomorrow into ml.price_forecast")
+    predict.add_argument(
+        "--date",
+        dest="forecast_date",
+        type=date.fromisoformat,
+        default=None,
+        help="forecast date D (default: today in Europe/Prague); forecasts D+1",
+    )
+    predict.add_argument("--force", action="store_true", help="replace a stored forecast")
+    history = commands.add_parser(
+        "backfill-history", help="store walk-forward forecasts from a delivery day on"
+    )
+    history.add_argument("--from", dest="start", type=date.fromisoformat, required=True)
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
@@ -202,8 +222,17 @@ def main(argv: list[str] | None = None) -> int:
         report(run(test_candidates(), TEST, args.refit_every), "test")
     elif args.command == "importance":
         importance()
-    else:
+    elif args.command == "report":
         execute_report(args.refresh)
+    else:
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        with Warehouse.from_settings(get_settings()) as warehouse:
+            frame = features.load(warehouse.con)
+            if args.command == "predict":
+                forecast_date = args.forecast_date or datetime.now(PRAGUE).date()
+                production.predict(warehouse, frame, forecast_date, force=args.force)
+            else:
+                production.backfill_history(warehouse, frame, args.start)
     return 0
 
 

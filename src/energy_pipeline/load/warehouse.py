@@ -96,6 +96,31 @@ OPENMETEO_FORECASTS = RawTable(
         cloud_cover_pct DOUBLE
     """,
 )
+# Written by `forecast predict` (one row per delivery hour and model) and by
+# `forecast backfill-history` (walk-forward forecasts, run_type 'backtest').
+PRICE_FORECAST = RawTable(
+    name="ml.price_forecast",
+    key=("hour_start_utc", "model", "run_type"),
+    columns="""
+        forecast_date DATE NOT NULL,
+        delivery_date DATE NOT NULL,
+        hour_start_utc TIMESTAMPTZ NOT NULL,
+        cutoff_at_utc TIMESTAMPTZ NOT NULL,
+        model VARCHAR NOT NULL,
+        model_version VARCHAR NOT NULL,
+        code_version VARCHAR NOT NULL,
+        run_type VARCHAR NOT NULL,
+        predicted_price_eur_mwh DOUBLE NOT NULL,
+        p10_eur_mwh DOUBLE,
+        p50_eur_mwh DOUBLE,
+        p90_eur_mwh DOUBLE,
+        issued_at TIMESTAMPTZ,
+        is_late BOOLEAN,
+        trained_through DATE,
+        training_hours INTEGER,
+        weather_latest_run_utc TIMESTAMPTZ
+    """,
+)
 DBT_RESULTS = RawTable(
     name="ops.dbt_results",
     key=("invocation_id", "unique_id"),
@@ -117,6 +142,7 @@ RAW_TABLES = (
     CHMI_OBSERVATIONS,
     CHMI_STATIONS,
     OPENMETEO_FORECASTS,
+    PRICE_FORECAST,
     DBT_RESULTS,
 )
 
@@ -169,6 +195,7 @@ class Warehouse:
     def create_schema(self) -> None:
         self.con.execute("CREATE SCHEMA IF NOT EXISTS raw")
         self.con.execute("CREATE SCHEMA IF NOT EXISTS ops")
+        self.con.execute("CREATE SCHEMA IF NOT EXISTS ml")
         for table in RAW_TABLES:
             self.con.execute(table.ddl)
         self.con.execute(PIPELINE_RUNS_DDL)

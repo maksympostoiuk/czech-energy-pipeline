@@ -126,6 +126,19 @@ def daily_tasks(today: date) -> list[Task]:
     ]
 
 
+def morning_tasks(today: date) -> list[Task]:
+    """Before the price forecast: today's prices (in case yesterday's run was late) and the
+    weather forecasts of the runs published overnight."""
+    return [
+        Task("ote", today),
+        Task(
+            "openmeteo",
+            today - timedelta(days=OPENMETEO_RELOAD_DAYS),
+            today + timedelta(days=1),
+        ),
+    ]
+
+
 def _periods(
     start: date, end: date, next_start: Callable[[date], date]
 ) -> Iterator[tuple[date, date]]:

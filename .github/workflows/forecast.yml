@@ -1,0 +1,77 @@
+name: Price forecast
+
+on:
+  schedule:
+    # Tomorrow's forecast must exist before the day-ahead auction closes at 12:00 Prague
+    # time (10:00 UTC in summer, 11:00 in winter). GitHub delays scheduled runs by up to a
+    # few hours, so there are three runs off the top of the hour; the first one that
+    # succeeds stores the forecast and the later ones find it and stop. Not before ~04:00:
+    # the ICON-EU 00Z run reaches Open-Meteo about three hours after initialisation.
+    - cron: "13 4 * * *"
+    - cron: "37 6 * * *"
+    - cron: "53 8 * * *"
+  workflow_dispatch:
+    inputs:
+      history_from:
+        description: Also store walk-forward forecasts from this delivery day (YYYY-MM-DD)
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+# One writer at a time, shared with the daily load and the backfill.
+concurrency:
+  group: warehouse
+  cancel-in-progress: false
+
+env:
+  PIPELINE_ENV: prod
+  DBT_TARGET: prod
+  MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+
+jobs:
+  forecast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check that the MotherDuck token is configured
+        run: |
+          if [ -z "$MOTHERDUCK_TOKEN" ]; then
+            echo "::error::Repository secret MOTHERDUCK_TOKEN is missing (see README, Production)."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.2  # only full version tags are published
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Load today's prices and the overnight weather forecasts
+        run: uv run pipeline morning
+
+      # Only what the features depend on, and no wall-clock checks: the full build with
+      # freshness tests runs in the afternoon after OTE publishes.
+      - name: Build the features (dbt)
+        working-directory: dbt
+        run: |
+          uv run dbt deps
+          uv run dbt build --select +ml_features_hourly --exclude tag:freshness
+
+      - name: Forecast tomorrow
+        run: uv run forecast predict
+
+      - name: Store walk-forward history (manual runs with history_from)
+        if: inputs.history_from != ''
+        env:
+          HISTORY_FROM: ${{ inputs.history_from }}
+        run: |
+          uv run forecast backfill-history --from "$HISTORY_FROM"
+          cd dbt && uv run dbt build --select ml_forecast_accuracy_hourly+
+
+      # dbt results are not recorded here: the data quality page shows the full afternoon
+      # build, which also scores yesterday's forecast once OTE has published the prices.

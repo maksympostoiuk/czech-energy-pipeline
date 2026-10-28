@@ -128,3 +128,66 @@ models:
       - name: cz_radiation_wm2
       - name: cz_wind_10m_ms
       - name: reporting_stations
+
+  - name: ml_forecast_accuracy_hourly
+    description: >
+      Stored forecasts (ml.price_forecast) joined with the published hourly price: error,
+      absolute error and whether the price fell inside the p10-p90 interval. Hours whose
+      price is not published yet are not in the model.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [hour_start_utc, model, run_type]
+      - dbt_utils.expression_is_true:
+          name: ml_forecast_is_for_the_day_after_the_forecast_date
+          arguments:
+            expression: "forecast_date = delivery_date - 1"
+      - dbt_utils.expression_is_true:
+          name: ml_forecast_interval_is_ordered
+          arguments:
+            expression: "p10_eur_mwh <= p90_eur_mwh"
+          config:
+            where: "p10_eur_mwh is not null"
+      - dbt_utils.expression_is_true:
+          name: ml_forecast_live_rows_record_when_they_were_issued
+          arguments:
+            expression: "issued_at is not null and is_late is not null"
+          config:
+            where: "run_type = 'live'"
+    columns:
+      - name: model
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [lightgbm, benchmark_yesterday, benchmark_week_ago]
+      - name: run_type
+        description: live (issued every morning) or backtest (walk-forward history).
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [live, backtest]
+      - name: is_late
+        description: Issued after the cutoff (too late for the auction, though it used no later data).
+      - name: error_eur_mwh
+        description: Forecast minus actual price.
+      - name: is_in_interval
+        description: Actual price within [p10, p90]; null for models without an interval.
+
+  - name: ml_forecast_daily_metrics
+    description: MAE, RMSE, bias and interval coverage per delivery day, model and run type.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [delivery_date, model, run_type]
+    columns:
+      - name: hours
+        description: Scored hours (23, 24 or 25 for a complete day).
+      - name: mae_eur_mwh
+        data_tests: [not_null]
+      - name: interval_coverage
+        description: Share of the day's hours inside the p10-p90 interval (0.8 nominal).
+        data_tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+                max_value: 1

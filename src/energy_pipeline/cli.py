@@ -18,6 +18,7 @@ from energy_pipeline.pipeline import (
     Task,
     backfill_tasks,
     daily_tasks,
+    morning_tasks,
     pending,
     run_tasks,
 )
@@ -64,6 +65,9 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     subcommands.add_parser(
         "daily", help="the scheduled run: tomorrow's prices, FX, weather and weather forecasts"
     )
+    subcommands.add_parser(
+        "morning", help="before the price forecast: today's prices and fresh weather forecasts"
+    )
     backfill = subcommands.add_parser("backfill", parents=[sources], help="load a date range")
     backfill.add_argument("--from", dest="start", type=date.fromisoformat, required=True)
     backfill.add_argument(
@@ -100,6 +104,8 @@ def main(argv: list[str] | None = None) -> int:
     min_interval = 0.0
     if args.command == "daily":
         tasks = daily_tasks(today)
+    elif args.command == "morning":
+        tasks = morning_tasks(today)
     elif args.command == "backfill":
         tasks = backfill_tasks(args.start, args.end or today, args.source or SOURCES)
         min_interval = BACKFILL_MIN_INTERVAL
