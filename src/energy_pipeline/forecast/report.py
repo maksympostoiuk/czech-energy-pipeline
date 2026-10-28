@@ -22,6 +22,17 @@ SURFACE = "#fcfcfb"
 TEXT = "#0b0b0b"
 TEXT_SECONDARY = "#52514e"
 GRID = "#e9e8e4"
+# Vega writes negative numbers with U+2212; GitHub's notebook viewer garbles that character
+# in SVG output, so labels use the ASCII hyphen-minus.
+ASCII_NUMBERS = {
+    "number": {
+        "decimal": ".",
+        "thousands": ",",
+        "grouping": [3],
+        "currency": ["", ""],
+        "minus": "-",
+    }
+}
 
 MAIN = ("lightgbm", "weather_forecast")
 BENCHMARK = ("benchmark_yesterday", "benchmark")
@@ -153,6 +164,7 @@ def _styled(chart: alt.TopLevelMixin, height: int = 280, width: int = 640) -> al
         )
         .configure_legend(orient="top", labelColor=TEXT_SECONDARY, titleColor=TEXT_SECONDARY)
         .configure_title(color=TEXT, fontSize=14, anchor="start", fontWeight="normal")
+        .configure(locale=ASCII_NUMBERS)
     )
 
 

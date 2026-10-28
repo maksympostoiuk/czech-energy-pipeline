@@ -86,4 +86,7 @@ def test_every_chart_is_valid_vega_lite(predictions: pd.DataFrame) -> None:
     ]
 
     for chart in charts:
-        json.dumps(chart.to_dict())  # fails on values Vega-Lite cannot take, e.g. dates
+        spec = chart.to_dict()
+        json.dumps(spec)  # fails on values Vega-Lite cannot take, e.g. dates
+        # GitHub's notebook viewer garbles the U+2212 minus Vega uses by default.
+        assert spec["config"]["locale"]["number"]["minus"] == "-"
