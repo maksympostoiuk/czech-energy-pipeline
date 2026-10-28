@@ -3,13 +3,15 @@
     forecast validate     compare candidate settings on the validation period
     forecast backtest     score the chosen models on the test period (all variants)
     forecast importance   SHAP feature importance of the LightGBM model
+    forecast report       execute forecasting/report.ipynb (--refresh re-runs the above)
 
-Results are written to data/forecast/ and printed. Both read the local warehouse
-(data/warehouse.duckdb) after `dbt build`.
+Results are written to data/forecast/ and printed. All read the local warehouse
+(data/warehouse.duckdb) after `dbt build`; run them from the repository root.
 """
 
 import argparse
 import logging
+import os
 import sys
 import time
 from collections.abc import Callable
@@ -38,6 +40,7 @@ from energy_pipeline.forecast.models import (
 )
 
 OUTPUT = Path("data/forecast")
+NOTEBOOK = Path("forecasting/report.ipynb")
 log = logging.getLogger(__name__)
 
 Candidate = tuple[str, Callable[[], Model]]
@@ -159,6 +162,25 @@ def importance(period: Period = TEST) -> pd.DataFrame:
     return result
 
 
+def execute_report(refresh: bool) -> None:
+    """Run every cell of the report notebook and save it with its outputs."""
+    import nbformat
+    from nbclient import NotebookClient
+
+    os.environ["FORECAST_REFRESH"] = "1" if refresh else "0"  # read by the first cell
+    notebook = nbformat.read(NOTEBOOK, as_version=4)
+    client = NotebookClient(
+        notebook,
+        timeout=3600,
+        kernel_name="python3",
+        resources={"metadata": {"path": str(Path.cwd())}},  # cells run from the repo root
+    )
+    client.execute()
+    # Bytes, not nbformat.write: text mode would turn the line endings into CRLF on Windows.
+    NOTEBOOK.write_bytes((nbformat.writes(notebook) + "\n").encode("utf-8"))
+    log.info("executed %s", NOTEBOOK)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="forecast", description=__doc__.split("\n")[0])
     commands = parser.add_subparsers(dest="command", required=True)
@@ -167,6 +189,10 @@ def main(argv: list[str] | None = None) -> int:
     backtest = commands.add_parser("backtest", help="score the chosen models on the test period")
     backtest.add_argument("--refit-every", type=int, default=1)
     commands.add_parser("importance", help="SHAP feature importance on the test period")
+    report_parser = commands.add_parser("report", help="execute forecasting/report.ipynb")
+    report_parser.add_argument(
+        "--refresh", action="store_true", help="re-run validate, backtest and importance first"
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
@@ -174,8 +200,10 @@ def main(argv: list[str] | None = None) -> int:
         report(run(validation_candidates(), VALIDATION, args.refit_every), "validation")
     elif args.command == "backtest":
         report(run(test_candidates(), TEST, args.refit_every), "test")
-    else:
+    elif args.command == "importance":
         importance()
+    else:
+        execute_report(args.refresh)
     return 0
 
 

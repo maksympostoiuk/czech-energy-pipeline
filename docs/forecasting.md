@@ -1,5 +1,7 @@
 # Day-ahead price forecast: method and results
 
+The same results with charts: [forecasting/report.ipynb](../forecasting/report.ipynb).
+
 The task: before the day-ahead auction closes at **12:00 Prague time on day D**, forecast the
 hourly price of the CZ bidding zone for every hour of **D+1**. Results below come from
 `uv run forecast validate`, `uv run forecast backtest` and `uv run forecast importance`
@@ -107,10 +109,10 @@ forecast, trained on everything before 2026-03-01; `uv run forecast importance`)
 | Feature | Mean \|SHAP\| | Feature | Mean \|SHAP\| |
 |---|---|---|---|
 | price_same_hour_mean_7d | 18.0 | price_same_hour_week_ago | 4.2 |
-| price_same_hour_d | 10.7 | day_of_week | 3.6 |
+| price_same_hour_d | 10.7 | day_of_week | 3.5 |
 | de_wind_100m_ms | 6.5 | offpeak_d | 3.5 |
 | de_solar_radiation_wm2 | 5.5 | price_same_hour_max_7d | 3.0 |
-| cz_radiation_wm2 | 4.8 | de_wind_100m_day_mean_ms | 2.8 |
+| cz_radiation_wm2 | 4.7 | de_wind_100m_day_mean_ms | 2.8 |
 | is_business_day | 4.6 | cz_temperature_day_mean_c | 1.8 |
 
 Recent prices set the level; German wind and solar, then Czech radiation, move it hour by
@@ -138,6 +140,8 @@ cd dbt && uv run dbt build && cd ..
 uv run forecast validate                         # ~2 minutes
 uv run forecast backtest                         # ~20 minutes on 20 cores
 uv run forecast importance
+uv run forecast report                           # executes forecasting/report.ipynb
 ```
 
+`uv run forecast report --refresh` runs the three commands above and then the notebook.
 Outputs go to `data/forecast/` (predictions as Parquet, metrics as CSV).

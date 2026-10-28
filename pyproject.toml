@@ -37,9 +37,14 @@ ml = [
     "pandas>=3.1.0",
     "scikit-learn>=1.9.1",
 ]
+report = [
+    "ipykernel>=7.4.0",
+    "nbconvert>=7.17.2",
+    "vl-convert-python>=1.9.0.post1",
+]
 
 [tool.uv]
-default-groups = ["dev", "dbt", "dashboard", "ml"]
+default-groups = ["dev", "dbt", "dashboard", "ml", "report"]
 
 [build-system]
 requires = ["hatchling"]
