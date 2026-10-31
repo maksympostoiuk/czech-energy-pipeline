@@ -23,9 +23,11 @@ class Period:
     end: date | None = None  # None: the last delivery day with published prices
 
 
-# Settings are chosen on the validation period; the test period is scored once at the end.
+# Settings are chosen on the validation period; the test period is scored at the end. Its
+# end is fixed so the report keeps reproducing the same numbers as new days arrive: the
+# track record after it is on the dashboard (ml.ml_forecast_daily_metrics).
 VALIDATION = Period(date(2025, 9, 1), date(2026, 2, 28))
-TEST = Period(date(2026, 3, 1))
+TEST = Period(date(2026, 3, 1), date(2026, 10, 29))
 OUTPUT_COLUMNS = [*KEYS, "local_hour", "is_peak", TARGET]
 
 

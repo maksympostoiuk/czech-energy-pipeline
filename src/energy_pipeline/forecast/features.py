@@ -65,6 +65,11 @@ OBSERVED_DAY_MEANS = {
     "cz_temperature_day_mean_c": "cz_temperature_c",
     "cz_radiation_day_mean_wm2": "cz_radiation_wm2",
 }
+# DuckDB sums in parallel, so the mart's averages differ in the 15th digit between builds.
+# That makes equal values unequal, and LightGBM then bins and splits differently: single
+# hours moved by up to 8.5 EUR/MWh. Averages of the inputs have at most 8 decimals, so 9
+# removes the noise without creating ties that noise could round either way (6 did not).
+FEATURE_DECIMALS = 9
 # Kept next to the features for evaluation, never fed to a model.
 KEYS = ["hour_start_utc", "delivery_date", "forecast_date", "season"]
 
@@ -99,4 +104,4 @@ def design(frame: pd.DataFrame, variant: Variant) -> pd.DataFrame:
             data[column] = data[f"observed_{column}"]
         for day_mean, column in OBSERVED_DAY_MEANS.items():
             data[day_mean] = data.groupby("delivery_date")[column].transform("mean")
-    return data[feature_columns(variant)].astype("float64")
+    return data[feature_columns(variant)].astype("float64").round(FEATURE_DECIMALS)

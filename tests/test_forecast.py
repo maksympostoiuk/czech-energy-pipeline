@@ -129,11 +129,32 @@ def test_variants_differ_only_in_weather() -> None:
 
     assert not set(features.WEATHER) & set(no_weather.columns)
     assert list(forecast.columns) == list(observed.columns)
-    assert (observed["cz_temperature_c"] == frame["observed_cz_temperature_c"]).all()
-    assert (forecast["cz_temperature_c"] == frame["cz_temperature_c"]).all()
+    assert np.allclose(observed["cz_temperature_c"], frame["observed_cz_temperature_c"])
+    assert np.allclose(forecast["cz_temperature_c"], frame["cz_temperature_c"])
     day_mean = frame.groupby("delivery_date")["observed_cz_temperature_c"].transform("mean")
     assert np.allclose(observed["cz_temperature_day_mean_c"], day_mean)
     assert (observed["de_wind_100m_ms"] == forecast["de_wind_100m_ms"]).all()
+
+
+def test_float_noise_in_the_features_does_not_change_the_forecast() -> None:
+    """DuckDB's parallel sums differ in the last bits between dbt builds; that must not matter."""
+    frame = synthetic_frame(30)
+    # Equal values are what the noise breaks apart: averages repeat across a day's rows.
+    frame["base_d"] = frame.groupby("delivery_date")["base_d"].transform("mean").round(4)
+    rng = np.random.default_rng(3)
+    noisy = frame.copy()
+    for column in [*features.PRICES, *features.WEATHER]:
+        noisy[column] = frame[column] * (1 + rng.normal(0, 1e-15, len(frame)))
+
+    def predictions(data: pd.DataFrame) -> np.ndarray:
+        model = LightGBMModel("weather_forecast", params={"n_estimators": 30, "verbose": -1})
+        model.fit(data)
+        return model.predict(data)["prediction"].to_numpy()
+
+    assert features.design(noisy, "weather_forecast").equals(
+        features.design(frame, "weather_forecast")
+    )
+    assert np.array_equal(predictions(noisy), predictions(frame))
 
 
 @pytest.mark.parametrize("make_model", [RidgeModel, LightGBMModel])

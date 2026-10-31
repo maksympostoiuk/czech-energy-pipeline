@@ -25,7 +25,7 @@ from energy_pipeline.load.warehouse import PRICE_FORECAST, Warehouse
 log = logging.getLogger(__name__)
 
 # Bump when the model or its settings change; code_version records the exact commit.
-MODEL_VERSION = "lightgbm-l1-500-cqr28-v1"
+MODEL_VERSION = "lightgbm-l1-500-cqr28-v2"
 MAIN_MODEL = "lightgbm"
 PRODUCTION_MODELS: tuple[Callable[[], Model], ...] = (
     lambda: LightGBMModel("weather_forecast", quantiles=True),
