@@ -163,6 +163,10 @@ stores the walk-forward forecasts of the same models as `run_type = 'backtest'`,
 dashboard has a track record from the start; they reproduce the test results above
 (MAE 21.29 vs 32.45).
 
+The dashboard page **Forecast vs actual** reads these tables: the latest forecast with its
+interval, the day before against the actual price, the rolling MAE of the model and the
+benchmarks, and an accuracy table. Live forecasts replace `backtest` rows for the same day.
+
 ## Reproduce
 
 ```bash

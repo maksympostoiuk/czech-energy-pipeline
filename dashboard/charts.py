@@ -150,12 +150,17 @@ def labelled_lines(
     return alt.layer(lines, points, hover, end_labels)
 
 
-def _end_labels(long: pd.DataFrame, x: str, min_gap_share: float = 0.06) -> pd.DataFrame:
+def _end_labels(
+    long: pd.DataFrame, x: str, min_gap_share: float = 0.06, value_range: float | None = None
+) -> pd.DataFrame:
     """Last point of each series, with label positions pushed apart when lines end close
-    together (min gap = a share of the value range), so labels never overprint."""
+    together (min gap = a share of the value range, or of value_range when the axis spans
+    more than the lines), so labels never overprint."""
     last = long.dropna(subset=["value"]).sort_values(x).groupby("series", as_index=False).tail(1)
     last = last.sort_values("value").reset_index(drop=True)
-    gap = (long["value"].max() - long["value"].min()) * min_gap_share
+    if value_range is None:
+        value_range = long["value"].max() - long["value"].min()
+    gap = value_range * min_gap_share
     positions: list[float] = []
     for value in last["value"]:
         positions.append(value if not positions else max(value, positions[-1] + gap))
@@ -243,3 +248,81 @@ def scatter_with_trend(
     )
     trend = base.transform_loess(x, y, bandwidth=0.4).mark_line(color=TEXT_SECONDARY, strokeWidth=2)
     return alt.layer(dots, trend)
+
+
+def forecast_vs_actual(df: pd.DataFrame) -> alt.LayerChart:
+    """Forecast with its p10-p90 band, the actual price once published, a crosshair tooltip
+    and direct labels. x is elapsed hours since local midnight, so DST days plot correctly."""
+    series = [("forecast", "Forecast"), ("actual", "Actual price")]
+    series = [(column, label) for column, label in series if df[column].notna().any()]
+    labels = [label for _, label in series]
+    long = df.melt(id_vars=["hour"], value_vars=[c for c, _ in series], var_name="column")
+    long["series"] = long["column"].map(dict(series))
+    last_hour = int(df["hour"].max())
+    axis_range = max(df["p90"].max(), long["value"].max(), 0) - min(
+        df["p10"].min(), long["value"].min(), 0
+    )
+    x_enc = alt.X(
+        "hour:Q",
+        title="Hours since local midnight",
+        scale=alt.Scale(domain=[0, last_hour], nice=False),
+        axis=alt.Axis(values=list(range(0, last_hour + 1, 2)), grid=False),
+    )
+    color = alt.Color(
+        "series:N",
+        scale=alt.Scale(domain=labels, range=[BLUE, TEXT_SECONDARY][: len(labels)]),
+        legend=alt.Legend(title=None),
+    )
+    nearest = alt.selection_point(nearest=True, on="pointerover", fields=["hour"], empty=False)
+
+    band = (
+        alt.Chart(df)
+        .mark_area(color=BLUE, opacity=0.18)
+        .encode(x=x_enc, y=alt.Y("p10:Q", title="EUR/MWh"), y2="p90:Q")
+    )
+    lines = alt.Chart(long).mark_line(strokeWidth=2).encode(x=x_enc, y="value:Q", color=color)
+    points = (
+        alt.Chart(long)
+        .mark_point(size=64, filled=True)
+        .encode(
+            x=x_enc,
+            y="value:Q",
+            color=color,
+            opacity=alt.condition(nearest, alt.value(1), alt.value(0)),
+        )
+    )
+    tooltip = [
+        alt.Tooltip("local_time:N", title="Starts"),
+        alt.Tooltip("forecast:Q", title="Forecast EUR/MWh", format=",.1f"),
+        alt.Tooltip("p10:Q", title="p10", format=",.1f"),
+        alt.Tooltip("p90:Q", title="p90", format=",.1f"),
+    ]
+    if "actual" in dict(series):
+        tooltip.append(alt.Tooltip("actual:Q", title="Actual EUR/MWh", format=",.1f"))
+    hover = (
+        alt.Chart(df)
+        .mark_rule(color=MUTED)
+        .encode(
+            x=x_enc, opacity=alt.condition(nearest, alt.value(0.6), alt.value(0)), tooltip=tooltip
+        )
+        .add_params(nearest)
+    )
+    end_labels = (
+        alt.Chart(_end_labels(long, "hour", value_range=float(axis_range)))
+        .mark_text(align="left", dx=6, fontSize=12)
+        .encode(x=x_enc, y="label_y:Q", text="series:N", color=alt.value(TEXT_SECONDARY))
+    )
+    zero = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(color=MUTED).encode(y="y:Q")
+    return alt.layer(band, zero, lines, points, hover, end_labels)
+
+
+def date_marker(day: pd.Timestamp, label: str) -> alt.LayerChart:
+    """A vertical rule with a caption at the top, to layer over a chart with a date axis."""
+    data = pd.DataFrame({"day": [day], "label": [label]})
+    rule = alt.Chart(data).mark_rule(color=MUTED, strokeDash=[4, 4]).encode(x="day:T")
+    text = (
+        alt.Chart(data)
+        .mark_text(align="right", baseline="top", dx=-4, dy=4, fontSize=11, color=TEXT_SECONDARY)
+        .encode(x="day:T", y=alt.value(0), text="label:N")
+    )
+    return alt.layer(rule, text)

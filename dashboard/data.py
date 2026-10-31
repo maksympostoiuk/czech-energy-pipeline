@@ -36,7 +36,6 @@ def _connection() -> duckdb.DuckDBPyConnection:
     else:
         path = _setting("DASHBOARD_DUCKDB_PATH") or str(LOCAL_DATABASE)
         con = duckdb.connect(path, read_only=True)
-    con.execute("SET TimeZone = 'UTC'")
     return con
 
 
@@ -46,8 +45,11 @@ def source_label() -> str:
 
 @st.cache_data(ttl=CACHE_SECONDS, show_spinner=False)
 def query(sql: str, params: tuple = ()) -> pd.DataFrame:
-    # A cursor per query: Streamlit serves sessions from several threads.
-    return _connection().cursor().execute(sql, list(params)).df()
+    # A cursor per query: Streamlit serves sessions from several threads. A cursor does not
+    # inherit session settings, so each one sets the time zone itself.
+    cursor = _connection().cursor()
+    cursor.execute("SET TimeZone = 'UTC'")
+    return cursor.execute(sql, list(params)).df()
 
 
 # --- Day-ahead prices -------------------------------------------------------------------
@@ -276,4 +278,120 @@ def coverage() -> pd.DataFrame:
             min(hour_start_utc)::date, max(hour_start_utc)::date, count(*)
         from intermediate.int_weather_hourly_station
         """
+    )
+
+
+# --- Price forecast ---------------------------------------------------------------------
+
+MAIN_MODEL = "lightgbm"
+# A delivery day can have both a walk-forward ('backtest') and a live forecast: show the live.
+PREFER_LIVE = "row_number() over (partition by {key}, model order by run_type = 'live' desc) = 1"
+
+
+def forecast_days() -> pd.DataFrame:
+    """Delivery days with a forecast of the main model, latest first."""
+    return query(
+        f"""
+        select
+            delivery_date,
+            run_type,
+            any_value(issued_at) as issued_at,
+            bool_or(is_late) as is_late,
+            any_value(model_version) as model_version
+        from ml.price_forecast
+        where model = ?
+        group by delivery_date, run_type, model
+        qualify {PREFER_LIVE.format(key="delivery_date")}
+        order by delivery_date desc
+        """,
+        (MAIN_MODEL,),
+    )
+
+
+def forecast_hours(day: date) -> pd.DataFrame:
+    """The main model's forecast for one delivery day, with the actual price once published.
+    Positions are elapsed hours since local midnight, so DST days plot correctly."""
+    df = query(
+        f"""
+        with forecast as (
+            select *
+            from ml.price_forecast
+            where delivery_date = ? and model = ?
+            qualify {PREFER_LIVE.format(key="hour_start_utc")}
+        )
+        select
+            (
+                epoch(forecast.hour_start_utc)
+                - epoch(forecast.delivery_date::timestamp at time zone 'Europe/Prague')
+            )::int // 3600 as hour,
+            forecast.hour_start_utc,
+            forecast.predicted_price_eur_mwh as forecast,
+            forecast.p10_eur_mwh as p10,
+            forecast.p90_eur_mwh as p90,
+            prices.price_eur_mwh as actual
+        from forecast
+        left join marts.fct_dam_prices_hourly as prices using (hour_start_utc)
+        order by forecast.hour_start_utc
+        """,
+        (day, MAIN_MODEL),
+    )
+    if not df.empty:
+        local = pd.to_datetime(df["hour_start_utc"], utc=True).dt.tz_convert("Europe/Prague")
+        df["local_time"] = local.dt.strftime("%H:%M %Z")
+    return df
+
+
+def forecast_day_scores(day: date) -> pd.DataFrame:
+    """One row per model for a scored delivery day."""
+    return query(
+        f"""
+        select model, run_type, mae_eur_mwh, rmse_eur_mwh, bias_eur_mwh, interval_coverage
+        from ml.ml_forecast_daily_metrics
+        where delivery_date = ?
+        qualify {PREFER_LIVE.format(key="delivery_date")}
+        """,
+        (day,),
+    )
+
+
+def forecast_daily_mae() -> pd.DataFrame:
+    """Daily MAE per model (columns), with the run type of the main model's forecast."""
+    long = query(
+        f"""
+        select delivery_date, model, run_type, mae_eur_mwh
+        from ml.ml_forecast_daily_metrics
+        qualify {PREFER_LIVE.format(key="delivery_date")}
+        order by delivery_date
+        """
+    )
+    if long.empty:
+        return long
+    wide = long.pivot(index="delivery_date", columns="model", values="mae_eur_mwh")
+    main = long[long["model"] == MAIN_MODEL].set_index("delivery_date")["run_type"]
+    return wide.assign(run_type=main).reset_index()
+
+
+def forecast_metrics(where: str, params: tuple = ()) -> pd.DataFrame:
+    """Accuracy per model over the scored hours selected by `where` (a fixed SQL condition)."""
+    return query(
+        f"""
+        with scored as (
+            select *
+            from ml.ml_forecast_accuracy_hourly
+            qualify {PREFER_LIVE.format(key="hour_start_utc")}
+        )
+        select
+            model,
+            count(distinct delivery_date) as days,
+            avg(abs_error_eur_mwh) as mae,
+            sqrt(avg(error_eur_mwh * error_eur_mwh)) as rmse,
+            avg(abs_error_eur_mwh) filter (where is_peak) as mae_peak,
+            avg(abs_error_eur_mwh) filter (where not is_peak) as mae_offpeak,
+            avg(is_in_interval::int) as coverage
+        from scored
+        where {where}
+        group by model
+        order by mae
+        """,
+        params,
     )
