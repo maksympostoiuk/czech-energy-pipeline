@@ -122,3 +122,105 @@ AppTest on that same empty warehouse. Wall-clock and history-dependent tests are
 
 **Consequences.** CI takes under a minute and catches broken SQL, schema drift and dashboard
 errors before deployment.
+
+## 10. Forecast the hour, not the quarter-hour
+
+**Context.** Prices have been traded per 15 minutes since 2025-10-01, per hour before. The
+forecast needs as much history as possible.
+
+**Decision.** The target is the hourly price of `fct_dam_prices_hourly`: over two and a half
+years of comparable history, against about one year of quarter-hours.
+
+**Consequences.** The test covers every season with a long training history, and the model
+matches the hourly products most consumers compare. Quarter-hour shape inside the hour is not
+forecast; it can be added once more of that history exists.
+
+## 11. Walk-forward evaluation, settings chosen on a separate period
+
+**Context.** A random split would train on the future and flatter the model. Prices also drift
+by tens of EUR/MWh within a year, so a single fit-and-score split says little.
+
+**Decision.** Each delivery day is forecast by a model trained only on delivery days up to the
+forecast date, then the window moves a day, the same daily refit as in production. Settings are
+chosen on 2025-09 to 2026-02 and scored on 2026-03 to 2026-10, against two naive benchmarks. MAE
+and RMSE, not MAPE: prices are often zero or negative. The test period has a fixed end, so the
+report reproduces the same numbers; later days are the live track record on the dashboard.
+
+**Consequences.** The result is one a production run could have achieved: 34 % lower MAE than the
+best benchmark. A plausible hypothesis (predict the deviation from the recent price level) lost on
+the validation period and was dropped. The test period was scored more than once: the raw intervals were
+visibly overconfident there, so calibration was added and chosen on the validation period, and
+features were later rounded. Neither changed the chosen model. This is recorded in the report.
+
+## 12. Features known at the cutoff, never observed weather
+
+**Context.** Observed weather explains prices well, but the weather of D+1 is unknown at 12:00 on
+D. Using it would inflate the results without any way to run in production.
+
+**Decision.** `ml_features_hourly` holds what existed at the cutoff, whatever the time of the run:
+the calendar, prices of delivery days up to D, and weather forecasts published before the cutoff.
+dbt tests check each row's sources against the cutoff, and a pytest test requires identical
+features with later data absent, present or altered. Observed weather sits in a separate model,
+used once, for an upper bound.
+
+**Consequences.** A late job cannot leak; it is only flagged `is_late`. The upper bound shows the
+forecast already captures nearly all of the value of weather: 21.30 against 21.25 with observed
+Czech weather. The leak test failed as it should when a leak was introduced on purpose, twice.
+
+## 13. Weather forecasts as issued: Previous Runs, ICON-EU, runs up to 00Z
+
+**Context.** History needs forecasts as they stood then. Open-Meteo's Historical Forecast API
+stitches the first hours of each run, which is close to observed weather.
+
+**Decision.** The Previous Runs API, whose `previous_dayN` was matched value by value against
+single model runs: for ICON-EU it comes from the run initialised at floor_6h(T - N days), or an
+older one. `issued_at` stores that bound. With a 6-hour publication margin only runs up to 00Z of D
+are used: day 1 for hours before 06:00 UTC of D+1, day 2 for the rest. ECMWF IFS 0.25° breaks the
+rule and is not used.
+
+**Consequences.** Leak safety rests on a stored, tested fact (`tests/test_fixtures.py`), checked
+only from 2026-04-02 on, when the single-run archive starts. Most hours use a forecast two days
+old, which costs little: radiation MAE 21.7 against 18.8 W/m². Previous_day1 everywhere
+would have leaked for most hours.
+
+## 14. Refit every morning, and never replace a forecast made on time
+
+**Context.** A forecast that is not stored as issued cannot be scored honestly, and GitHub starts
+scheduled jobs late, 6-7 hours in October 2026.
+
+**Decision.** Fitting takes seconds, so the job refits daily and stores no model files. It writes
+`ml.price_forecast` with `issued_at`, `is_late`, the model and code versions. The first
+successful run wins; later runs find the forecast and stop. Crons sit early enough for the delay;
+a scheduled run that starts before the overnight weather run is out exits. Incomplete inputs fail
+the job instead of giving a silently worse forecast.
+
+**Consequences.** Live forecasts stay as issued and are scored by dbt once prices appear.
+Depending on GitHub's scheduler stays the weak point: a longer delay means a late forecast,
+flagged but too late for the auction.
+
+## 15. Free plans shape the deployment
+
+**Context.** The MotherDuck trial ended on 2026-10-30 and every job failed at connect until a plan
+was chosen. The Lite plan has no Read Scaling tokens and caps compute at 10 hours a month.
+
+**Decision.** Stay on Lite. The dashboard uses its own Read/Write token and runs only SELECT
+queries. No extra logic to save compute: a measured day of runs takes 7.5 minutes of step time,
+about 3.8 hours a month.
+
+**Consequences.** Zero cost, but the dashboard's token could write if it leaked; it lives only in
+Streamlit's secrets and can be revoked on its own. How step time maps to billed compute is not
+known exactly, and heavy backfills count too.
+
+## 16. Round the features so results reproduce
+
+**Context.** Re-running the whole report after rebuilding the mart moved LightGBM's MAE by up to
+0.2 EUR/MWh on identical data, while Ridge did not move. DuckDB sums in parallel, so averages
+differ in the 15th digit between builds; equal values become unequal and tree splits change. An
+experiment moved single hours by up to 8.5 EUR/MWh with noise of 1e-15.
+
+**Decision.** `features.design` rounds to 9 decimals. Rounding to 6 was tried and failed: some
+averages end exactly on a tie in the 7th decimal, so noise still decided their rounding.
+
+**Consequences.** After a full rebuild of the mart, 504 of 504 sampled hourly forecasts match the
+stored ones exactly, and a test pins it. It also shows how sensitive trees are, so differences of
+about 0.2 EUR/MWh between variants are treated as noise. Revised source data can still move results.

@@ -230,7 +230,7 @@ czech-energy-pipeline/
 
 - ENTSO-E Transparency: нагрузка и генерация по типам в CZ (нужен бесплатный API-токен), что даёт объяснение цен через солнце/ветер в Германии.
 - Сравнение с соседними зонами (DE-LU, AT, SK, PL) через тот же SDAC.
-- Простой прогноз цены (baseline + gradient boosting) как отдельная витрина.
+- ~~Простой прогноз цены (baseline + gradient boosting)~~: сделано, см. [FORECAST_PLAN.md](FORECAST_PLAN.md).
 - Алерты в Telegram при отрицательных ценах на завтра.
 
 ## 7. Принципы работы

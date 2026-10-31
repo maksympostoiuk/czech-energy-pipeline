@@ -2,15 +2,19 @@
 
 [![CI](https://github.com/maksympostoiuk/czech-energy-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/maksympostoiuk/czech-energy-pipeline/actions/workflows/ci.yml)
 [![Daily load](https://github.com/maksympostoiuk/czech-energy-pipeline/actions/workflows/daily.yml/badge.svg)](https://github.com/maksympostoiuk/czech-energy-pipeline/actions/workflows/daily.yml)
+[![Price forecast](https://github.com/maksympostoiuk/czech-energy-pipeline/actions/workflows/forecast.yml/badge.svg)](https://github.com/maksympostoiuk/czech-energy-pipeline/actions/workflows/forecast.yml)
 
 A production-style ELT pipeline for the Czech electricity market. Every day it loads
 **day-ahead prices from OTE**, **EUR/CZK fixings from ČNB**, **weather observations from
 ČHMÚ** and **weather forecasts as issued before the auction from Open-Meteo**, models them
 with **dbt** on **DuckDB / MotherDuck**, checks them with **118 dbt data tests plus source
 freshness**, including a reconciliation with OTE's official reports, and publishes a **Streamlit**
-dashboard. GitHub Actions runs everything on a schedule, at zero cost.
+dashboard. On top of it, a **LightGBM model forecasts tomorrow's hourly prices** every morning
+before the auction, with an MAE 34 % below the best naive benchmark on a walk-forward test.
+GitHub Actions runs everything on a schedule, at zero cost.
 
 **[Live dashboard](https://czech-energy-prices.streamlit.app/)** ·
+**[Forecasting report](forecasting/report.ipynb)** ·
 **[dbt docs and lineage](https://maksympostoiuk.github.io/czech-energy-pipeline/)** ·
 **[Design decisions](docs/decisions.md)** ·
 **[Data sources](docs/sources.md)**
@@ -21,8 +25,8 @@ dashboard. GitHub Actions runs everything on a schedule, at zero cost.
 
 - **Sources:** OTE day-ahead market (CZ bidding zone), ČNB exchange rate fixing, 8 ČHMÚ weather stations (10-minute data), Open-Meteo forecasts (DWD ICON-EU) for those stations and 6 German solar and wind regions
 - **History:** since 1 January 2024: ~52,000 market periods, ~7.1 million weather observations, updated daily
-- **Stack:** Python 3.12 · httpx · pydantic · DuckDB / MotherDuck · dbt-core + dbt-duckdb · GitHub Actions · Streamlit · uv · ruff · pytest
-- **Quality:** 118 dbt data tests + source freshness, 142 pytest tests, CI on every push; daily indices equal OTE's official figures to the cent
+- **Stack:** Python 3.12 · httpx · pydantic · DuckDB / MotherDuck · dbt-core + dbt-duckdb · LightGBM · scikit-learn · GitHub Actions · Streamlit · uv · ruff · pytest
+- **Quality:** 118 dbt data tests + source freshness, 143 pytest tests, CI on every push; daily indices equal OTE's official figures to the cent
 
 ## Architecture
 
@@ -33,15 +37,20 @@ flowchart LR
     subgraph GHA["GitHub Actions · daily"]
         EL["Python extract + load<br/>pydantic validation, retries"]
         DBT["dbt build<br/>staging → intermediate → marts, ml<br/>118 data tests"]
+        FC["Price forecast, every morning<br/>LightGBM, features known at 12:00"]
     end
 
     subgraph MD["MotherDuck"]
         RAW[("raw")]
         MARTS[("marts")]
+        ML[("ml<br/>features, forecasts, accuracy")]
         OPS[("ops<br/>run log, test results")]
     end
 
     SRC --> EL --> RAW --> DBT --> MARTS --> APP["Streamlit dashboard"]
+    DBT --> ML
+    ML --> FC --> ML
+    ML --> APP
     EL -.-> OPS
     DBT -.-> OPS
     OPS --> APP
@@ -52,6 +61,42 @@ flowchart LR
 2. **Transform (dbt).** `staging` derives DST-safe UTC and local times. `intermediate` converts prices to CZK and builds an hourly national weather signal. `marts` hold the facts and dimensions the dashboard reads.
 3. **Test.** Source freshness, keys, ranges, completeness, cross-source checks and a reconciliation with OTE's published daily reports. Results are stored in the warehouse and shown on the dashboard.
 4. **Serve.** A Streamlit dashboard reads MotherDuck with its own token, and dbt docs are published to GitHub Pages.
+5. **Forecast.** Every morning a job refits the model on all published prices, stores tomorrow's forecast in `ml.price_forecast`, and dbt scores it once OTE publishes the actual prices.
+
+## Forecasting
+
+**Before the day-ahead auction closes at 12:00 Prague time on day D, forecast the hourly CZ price
+for every hour of D+1.** The forecast runs in production every morning and is compared with
+the actual prices on the [dashboard](https://czech-energy-prices.streamlit.app/~/+/forecast).
+
+| Model, test period 2026-03-01 to 2026-10-29 (243 days) | MAE, EUR/MWh | RMSE |
+|---|---|---|
+| Benchmark: same hour a week ago | 38.76 | 57.89 |
+| Benchmark: same hour yesterday | 32.45 | 49.41 |
+| Ridge with the weather forecast | 24.10 | 36.20 |
+| LightGBM without weather | 25.76 | 39.90 |
+| **LightGBM with the weather forecast** | **21.30** | **33.91** |
+| LightGBM with observed weather (upper bound, not usable in practice) | 21.25 | 33.91 |
+
+- **34 % lower MAE than the best benchmark**, and a lower daily error on 195 of 243 days.
+- **No leakage, by test.** Every feature is known at the cutoff: calendar, prices up to D, and
+  weather forecasts as issued before it. dbt tests check each row, and a pytest test builds the
+  features with data after the cutoff absent, present and altered, and requires identical results.
+- **Honest evaluation.** Walk-forward by day: every day is forecast by a model trained only on
+  earlier days. Settings were chosen on a separate validation period. No MAPE: prices are often
+  zero or negative.
+- **What the weather is worth.** The forecast cuts the MAE by 4.5 EUR/MWh, and perfect Czech
+  weather adds nothing measurable. German wind and solar forecasts matter more than Czech weather.
+- **Prediction intervals.** Conformally calibrated p10-p90 intervals contain 76.1 % of the test
+  hours (80 % nominal; about 63 % before calibration): still a little narrow when prices turn volatile.
+- **Limits.** No fuel or CO2 prices, cross-border flows or outages, so price jumps are
+  under-forecast, and the -500 EUR/MWh floor of 1 May 2026 was not foreseen.
+
+**[Report notebook with charts](forecasting/report.ipynb)** ·
+**[Method and full results](docs/forecasting.md)** · reproduce with `uv run forecast report --refresh`.
+Live forecasts began with delivery day 2026-10-30; their track record is on the dashboard.
+
+![Forecast vs actual page of the dashboard](docs/images/dashboard-forecast.png)
 
 ## Engineering highlights
 
@@ -104,7 +149,7 @@ and multi-series charts carry direct labels and a table view.
 | staging | `stg_ote__dam_prices`, `stg_cnb__fx_rates`, `stg_chmi__observations`, `stg_chmi__stations`, `stg_openmeteo__forecasts`, `stg_ops__pipeline_runs`, `stg_ops__dbt_results` | view |
 | intermediate | `int_fx_eur_czk_daily`, `int_dam_prices_czk`, `int_weather_hourly_station`, `int_weather_hourly_cz`, `int_delivery_hours`, `int_openmeteo_forecast_at_cutoff` | view |
 | marts | `dim_date`, `dim_station`, `fct_dam_prices` (incremental), `fct_dam_prices_hourly`, `fct_daily_market_summary`, `mart_price_vs_weather` | table |
-| ml | `ml_features_hourly` (features of each delivery hour as known at 12:00 Prague time the day before), `ml_oracle_weather_hourly` (observed weather, for the perfect-forecast experiment only) | table |
+| ml | `ml_features_hourly` (features of each delivery hour as known at 12:00 Prague time the day before), `ml_oracle_weather_hourly` (observed weather, for the perfect-forecast experiment only), `ml_forecast_accuracy_hourly`, `ml_forecast_daily_metrics` | table |
 
 Column-level documentation and the lineage graph are in the
 [dbt docs](https://maksympostoiuk.github.io/czech-energy-pipeline/).
@@ -138,19 +183,25 @@ Requires [uv](https://docs.astral.sh/uv/).
 ```bash
 uv sync                                       # Python 3.12 and all dependencies
 cp .env.example .env                          # local settings; secrets stay out of git
-uv run pytest                                 # 142 tests, no network needed
+uv run pytest                                 # 143 tests, no network needed
 uv run pipeline backfill --from 2024-01-01    # history into data/warehouse.duckdb (~15 min)
 cd dbt && uv run dbt deps && uv run dbt build && cd ..
 uv run streamlit run dashboard/app.py
+uv run forecast report --refresh              # validation, backtest, SHAP, notebook (~25 min)
 ```
 
 | Command | What it does |
 |---|---|
 | `pipeline run --date 2026-10-21 [--source ote]` | load one business date |
-| `pipeline daily` | the scheduled run: tomorrow's and today's prices, today's fixing, the last 7 days of weather |
+| `pipeline daily` | the scheduled run: tomorrow's and today's prices, today's fixing, the last 7 days of weather, weather forecasts |
+| `pipeline morning` | before the price forecast: today's prices and the overnight weather forecasts |
 | `pipeline backfill --from … [--to …] [--resume]` | load a period; `--resume` skips periods that already loaded |
 | `pipeline init` | create the raw and ops schemas |
 | `pipeline record-dbt-results <artifacts>` | store dbt results in `ops.dbt_results` |
+| `forecast validate` / `backtest` / `importance` | choose settings on the validation period / score the test period / SHAP importance |
+| `forecast report [--refresh]` | execute `forecasting/report.ipynb` (`--refresh` re-runs the three above first) |
+| `forecast predict [--date …] [--force]` | store tomorrow's forecast in `ml.price_forecast`; a stored forecast is kept unless forced |
+| `forecast backfill-history --from …` | store walk-forward forecasts for the dashboard's history |
 
 ## Production setup
 
@@ -166,24 +217,24 @@ One-time setup:
 
 1. Create a MotherDuck account (free Lite plan) and a read/write token. Add it as the repository secret `MOTHERDUCK_TOKEN`.
 2. In Settings → Pages, set Source to **GitHub Actions**.
-3. Run **Backfill** once, then **dbt docs**.
+3. Run **Backfill** once, then **dbt docs**, then **Price forecast** with `history_from` set (the daily job's freshness check fails until `ml.price_forecast` has rows).
 4. Deploy the dashboard on Streamlit Community Cloud. Use main file `dashboard/app.py`, Python 3.12, and a separate MotherDuck token in Secrets as `MOTHERDUCK_TOKEN = "…"`. The Lite plan has only Read/Write tokens (Read Scaling tokens need the Business plan); the dashboard itself runs nothing but SELECT queries.
 
 MotherDuck supports DuckDB up to 1.5.x, so `duckdb` is pinned to `<1.6`. GitHub disables
 scheduled workflows after 60 days without repository activity; if that happens, re-enable
-**Daily load** in the Actions tab.
+**Daily load** and **Price forecast** in the Actions tab.
 
 ## Repository layout
 
 ```
 src/energy_pipeline/   extract (ote, cnb, chmi, openmeteo), load (warehouse, dbt results), pipeline, CLI; forecast (models, walk-forward backtest)
-dbt/                   models (staging, intermediate, marts), seeds, singular tests
+dbt/                   models (staging, intermediate, marts, ml), seeds, singular tests
 dashboard/             Streamlit app: data access, charts, five pages
 tests/                 pytest suite and stored real API responses (fixtures/)
 forecasting/           report.ipynb: the price forecast, method and results
 scripts/               fetch_fixtures.py (refresh stored API responses), compare_forecast_models.py (forecast skill vs ČHMÚ)
-docs/                  sources.md, decisions.md, PLAN.md and FORECAST_PLAN.md (plans, in Russian), images/
-.github/workflows/     ci, daily, backfill, docs
+docs/                  forecasting.md, sources.md, decisions.md, PLAN.md and FORECAST_PLAN.md (plans, in Russian), images/
+.github/workflows/     ci, daily, forecast, backfill, docs
 ```
 
 ## Data sources

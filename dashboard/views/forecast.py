@@ -122,6 +122,7 @@ table = pd.concat(
     for period, (where, params) in periods.items()
 )
 table["model"] = table["model"].map(MODEL_NAMES).fillna(table["model"])
+table["coverage"] = table["coverage"].map(lambda v: "–" if pd.isna(v) else f"{v:.0%}")
 st.dataframe(
     table[["period", "model", "days", "mae", "rmse", "mae_peak", "mae_offpeak", "coverage"]],
     column_config={
@@ -132,7 +133,7 @@ st.dataframe(
         "rmse": st.column_config.NumberColumn("RMSE", format="%.1f"),
         "mae_peak": st.column_config.NumberColumn("MAE peak", format="%.1f"),
         "mae_offpeak": st.column_config.NumberColumn("MAE off-peak", format="%.1f"),
-        "coverage": st.column_config.NumberColumn("In p10–p90", format="percent"),
+        "coverage": "In p10–p90",
     },
     hide_index=True,
     width="stretch",
