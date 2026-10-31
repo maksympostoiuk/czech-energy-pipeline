@@ -134,9 +134,11 @@ with Germany's through SDAC.
 
 ## In production
 
-`.github/workflows/forecast.yml` runs at 04:13, 06:37 and 08:53 UTC, so at least one run
-lands before the auction closes at 12:00 Prague time even when GitHub delays scheduled
-jobs by hours:
+`.github/workflows/forecast.yml` is scheduled at 01:53, 02:53 and 04:13 UTC. In October 2026
+GitHub started these jobs 6-7 hours late, so these times aim to land before the auction
+closes at 12:00 Prague time (10:00 UTC in summer, 11:00 in winter) even then. A scheduled
+run that does start before 03:20 UTC exits without touching the warehouse, because the
+ICON-EU 00Z run reaches Open-Meteo around 03:05 UTC:
 
 1. `pipeline morning` loads today's prices (in case the afternoon run was late) and the
    weather forecasts of the overnight runs.

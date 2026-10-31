@@ -3,13 +3,13 @@ name: Price forecast
 on:
   schedule:
     # Tomorrow's forecast must exist before the day-ahead auction closes at 12:00 Prague
-    # time (10:00 UTC in summer, 11:00 in winter). GitHub delays scheduled runs by up to a
-    # few hours, so there are three runs off the top of the hour; the first one that
-    # succeeds stores the forecast and the later ones find it and stop. Not before ~04:00:
-    # the ICON-EU 00Z run reaches Open-Meteo about three hours after initialisation.
+    # time (10:00 UTC in summer, 11:00 in winter). In October 2026 GitHub started these
+    # runs 6-7 hours late, so the crons are early enough to land before 10:00 UTC even
+    # then. The first run that succeeds stores the forecast; the later ones find it and
+    # stop. A run that does start on time before 03:20 UTC exits at the next step.
+    - cron: "53 1 * * *"
+    - cron: "53 2 * * *"
     - cron: "13 4 * * *"
-    - cron: "37 6 * * *"
-    - cron: "53 8 * * *"
   workflow_dispatch:
     inputs:
       history_from:
@@ -35,7 +35,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
+      # The ICON-EU 00Z run of today reaches Open-Meteo around 03:05 UTC. A scheduled run
+      # before that would forecast from an older run, and block the later runs that could
+      # use it. Manual runs always go ahead.
+      - name: Check that the overnight weather run can be out
+        id: ready
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" = "schedule" ] && [ "$(date -u +%H%M)" -lt 320 ]; then
+            echo "Before 03:20 UTC: leaving the forecast to a later run."
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Check that the MotherDuck token is configured
+        if: steps.ready.outputs.go == 'true'
         run: |
           if [ -z "$MOTHERDUCK_TOKEN" ]; then
             echo "::error::Repository secret MOTHERDUCK_TOKEN is missing (see README, Production)."
@@ -43,26 +59,32 @@ jobs:
           fi
 
       - uses: actions/checkout@v7
+        if: steps.ready.outputs.go == 'true'
 
       - uses: astral-sh/setup-uv@v10.3.2  # only full version tags are published
+        if: steps.ready.outputs.go == 'true'
         with:
           enable-cache: true
 
       - name: Install dependencies
+        if: steps.ready.outputs.go == 'true'
         run: uv sync --locked
 
       - name: Load today's prices and the overnight weather forecasts
+        if: steps.ready.outputs.go == 'true'
         run: uv run pipeline morning
 
       # Only what the features depend on, and no wall-clock checks: the full build with
       # freshness tests runs in the afternoon after OTE publishes.
       - name: Build the features (dbt)
+        if: steps.ready.outputs.go == 'true'
         working-directory: dbt
         run: |
           uv run dbt deps
           uv run dbt build --select +ml_features_hourly --exclude tag:freshness
 
       - name: Forecast tomorrow
+        if: steps.ready.outputs.go == 'true'
         run: uv run forecast predict
 
       - name: Store walk-forward history (manual runs with history_from)

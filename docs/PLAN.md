@@ -137,7 +137,7 @@ flowchart LR
 - **`backfill.yml`** (ручной запуск с параметрами from/to/source/resume): `pipeline backfill` → `dbt build --full-refresh`.
 - **`docs.yml`** (push в `dbt/**` + ручной запуск): `dbt docs generate --static` по продовой базе → GitHub Pages.
 - `concurrency: warehouse` не даёт daily и backfill писать в базу одновременно.
-- Секреты: `MOTHERDUCK_TOKEN` в GitHub Secrets (и read-only токен в Streamlit Cloud на этапе 7).
+- Секреты: `MOTHERDUCK_TOKEN` в GitHub Secrets (и отдельный токен в Streamlit Cloud на этапе 7; на плане Lite есть только Read/Write).
 
 > **Совместимость:** MotherDuck поддерживает DuckDB только до 1.5.6, поэтому `duckdb` закреплён на `>=1.5.6,<1.6`. Локальная база, созданная DuckDB 2.0 (формат файла v69), была перенесена через Parquet. На Windows с кириллицей в имени пользователя расширение MotherDuck не может скачать компоненты в `~/.duckdb`, поэтому есть `PIPELINE_DUCKDB_EXTENSION_DIRECTORY` (на Linux-раннерах не нужно).
 

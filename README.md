@@ -51,7 +51,7 @@ flowchart LR
 1. **Extract + load (Python).** One extractor per source validates every response with pydantic and fails loudly on a changed format. Loads are idempotent upserts on natural keys, and every task is logged in `ops.pipeline_runs`.
 2. **Transform (dbt).** `staging` derives DST-safe UTC and local times. `intermediate` converts prices to CZK and builds an hourly national weather signal. `marts` hold the facts and dimensions the dashboard reads.
 3. **Test.** Source freshness, keys, ranges, completeness, cross-source checks and a reconciliation with OTE's published daily reports. Results are stored in the warehouse and shown on the dashboard.
-4. **Serve.** A Streamlit dashboard reads MotherDuck with a read-only token, and dbt docs are published to GitHub Pages.
+4. **Serve.** A Streamlit dashboard reads MotherDuck with its own token, and dbt docs are published to GitHub Pages.
 
 ## Engineering highlights
 
@@ -157,7 +157,7 @@ uv run streamlit run dashboard/app.py
 |---|---|---|
 | `ci.yml` | push to `main`, pull requests | ruff, pytest, `dbt build --empty`, dashboard render test |
 | `daily.yml` | 14:17 and 16:47 UTC, manual | `pipeline daily` → `dbt source freshness` → `dbt build` → results into `ops.dbt_results` |
-| `forecast.yml` | 04:13, 06:37 and 08:53 UTC, manual | `pipeline morning` → `dbt build` of the features → `forecast predict`: tomorrow's hourly price forecast into `ml.price_forecast` before the 12:00 auction; later runs find it and stop |
+| `forecast.yml` | 01:53, 02:53 and 04:13 UTC, manual | `pipeline morning` → `dbt build` of the features → `forecast predict`: tomorrow's hourly price forecast into `ml.price_forecast` before the 12:00 auction; later runs find it and stop |
 | `backfill.yml` | manual | `pipeline backfill` → `dbt build --full-refresh` |
 | `docs.yml` | changes in `dbt/`, manual | `dbt docs generate --static` → GitHub Pages |
 
@@ -166,7 +166,7 @@ One-time setup:
 1. Create a MotherDuck account (free Lite plan) and a read/write token. Add it as the repository secret `MOTHERDUCK_TOKEN`.
 2. In Settings → Pages, set Source to **GitHub Actions**.
 3. Run **Backfill** once, then **dbt docs**.
-4. Deploy the dashboard on Streamlit Community Cloud. Use main file `dashboard/app.py`, Python 3.12, and a read-only MotherDuck token in Secrets as `MOTHERDUCK_TOKEN = "…"`.
+4. Deploy the dashboard on Streamlit Community Cloud. Use main file `dashboard/app.py`, Python 3.12, and a separate MotherDuck token in Secrets as `MOTHERDUCK_TOKEN = "…"`. The Lite plan has only Read/Write tokens (Read Scaling tokens need the Business plan); the dashboard itself runs nothing but SELECT queries.
 
 MotherDuck supports DuckDB up to 1.5.x, so `duckdb` is pinned to `<1.6`. GitHub disables
 scheduled workflows after 60 days without repository activity; if that happens, re-enable

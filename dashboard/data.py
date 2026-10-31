@@ -1,6 +1,6 @@
 """Read-only access to the warehouse marts.
 
-Production (Streamlit Community Cloud): MotherDuck, with a read-only token in st.secrets.
+Production (Streamlit Community Cloud): MotherDuck, with a token of its own in st.secrets.
 Locally: the DuckDB file the pipeline writes (data/warehouse.duckdb), opened read-only.
 """
 
