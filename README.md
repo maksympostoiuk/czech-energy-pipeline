@@ -42,15 +42,13 @@ flowchart LR
 
     subgraph MD["MotherDuck"]
         RAW[("raw")]
-        MARTS[("marts")]
-        ML[("ml<br/>features, forecasts, accuracy")]
+        MARTS[("marts, ml features")]
+        FORECASTS[("ml forecasts")]
         OPS[("ops<br/>run log, test results")]
     end
 
     SRC --> EL --> RAW --> DBT --> MARTS --> APP["Streamlit dashboard"]
-    DBT --> ML
-    ML --> FC --> ML
-    ML --> APP
+    MARTS --> FC --> FORECASTS --> APP
     EL -.-> OPS
     DBT -.-> OPS
     OPS --> APP
